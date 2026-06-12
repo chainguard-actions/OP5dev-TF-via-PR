@@ -1,1 +1,15 @@
-# OP5dev-TF-via-PR
+# OP5dev/TF-via-PR
+
+Plan and apply Terraform/OpenTofu via PR automation, using best practices for secure and scalable IaC workflows.
+
+Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at [https://github.com/OP5dev/TF-via-PR](https://github.com/OP5dev/TF-via-PR).
+
+## Versions
+
+| Version | Tag | Upstream commit |
+|---------|-----|-----------------|
+| v13.7.0 | [`v13.7.0`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.0) | [`2f33acc`](https://github.com/OP5dev/TF-via-PR/commit/2f33acce007b2ffe06335724294c706680bcf96f) |
+
+## Privacy
+
+This Action contacts Chainguard's licensing server to verify authorization. Connection metadata (IP address, GitHub repository identifier, timestamp, and any metadata encoded in the auth token) is transmitted to Chainguard, Inc. even if authorization is denied in accordance with our [Privacy Notice](https://www.chainguard.dev/legal/privacy-notice)
