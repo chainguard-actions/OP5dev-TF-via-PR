@@ -9,6 +9,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
 | v13.7.0 | [`v13.7.0`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.0) | [`2f33acc`](https://github.com/OP5dev/TF-via-PR/commit/2f33acce007b2ffe06335724294c706680bcf96f) |
+| v13.7.4 | [`v13.7.4`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.4) | [`39ed263`](https://github.com/OP5dev/TF-via-PR/commit/39ed2635c056ca408ed24cc5c2baf0ef4381a7a5) |
 
 ## Privacy
 
