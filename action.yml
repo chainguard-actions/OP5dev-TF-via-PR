@@ -1,0 +1,978 @@
+name: Terraform/OpenTofu via Pull Request
+author: Rishav Dhar (@rdhar)
+description: Plan and apply Terraform/OpenTofu via PR automation, using best practices for secure and scalable IaC workflows.
+runs:
+  using: composite
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - env:
+        INPUTS_PLAN_ENCRYPT: ${{ inputs.plan-encrypt }}
+        INPUTS_PLAN_PARITY: ${{ inputs.plan-parity }}
+        INPUTS_TOOL: ${{ inputs.tool }}
+      shell: bash
+      run: |
+        # Check for required tools.
+        which gh > /dev/null 2>&1 || { echo "Please install GitHub CLI before running this action as it is required for interacting with GitHub."; exit 1; }
+        which jq > /dev/null 2>&1 || { echo "Please install jq before running this action as it is required for processing JSON outputs."; exit 1; }
+        which md5sum > /dev/null 2>&1 || { echo "Please install md5sum before running this action as it is required for naming the plan file artifact uniquely."; exit 1; }
+        which unzip > /dev/null 2>&1 || { echo "Please install unzip before running this action as it is required for unpacking the plan file artifact."; exit 1; }
+        which "$INPUTS_TOOL" > /dev/null 2>&1 || { echo "Please install $INPUTS_TOOL before running this action as it is required for provisioning TF code."; exit 1; }
+        if [[ "$INPUTS_PLAN_ENCRYPT" ]]; then which openssl > /dev/null 2>&1 || { echo "Please install openssl before running this action as it is required for plan file encryption."; exit 1; }; fi
+        if [[ "$INPUTS_PLAN_PARITY" ]]; then which diff > /dev/null 2>&1 || { echo "Please install diff before running this action as it is required for comparing plan file parity."; exit 1; }; fi
+    - id: arg
+      env:
+        INPUTS_ARG_AUTO_APPROVE: ${{ inputs.arg-auto-approve }}
+        INPUTS_ARG_BACKEND_CONFIG: ${{ inputs.arg-backend-config }}
+        INPUTS_ARG_BACKEND: ${{ inputs.arg-backend }}
+        INPUTS_ARG_BACKUP: ${{ inputs.arg-backup }}
+        INPUTS_ARG_CHDIR: ${{ inputs.arg-chdir || inputs.working-directory }}
+        INPUTS_ARG_CHECK: ${{ inputs.arg-check }}
+        INPUTS_ARG_COMPACT_WARNINGS: ${{ inputs.arg-compact-warnings }}
+        INPUTS_ARG_CONCISE: ${{ inputs.arg-concise }}
+        INPUTS_ARG_DESTROY: ${{ inputs.arg-destroy }}
+        INPUTS_ARG_DETAILED_EXITCODE: ${{ inputs.arg-detailed-exitcode }}
+        INPUTS_ARG_DIFF: ${{ inputs.arg-diff }}
+        INPUTS_ARG_FORCE_COPY: ${{ inputs.arg-force-copy }}
+        INPUTS_ARG_FROM_MODULE: ${{ inputs.arg-from-module }}
+        INPUTS_ARG_GENERATE_CONFIG_OUT: ${{ inputs.arg-generate-config-out }}
+        INPUTS_ARG_GET: ${{ inputs.arg-get }}
+        INPUTS_ARG_LIST: ${{ inputs.arg-list }}
+        INPUTS_ARG_LOCK_TIMEOUT: ${{ inputs.arg-lock-timeout }}
+        INPUTS_ARG_LOCK: ${{ inputs.arg-lock }}
+        INPUTS_ARG_LOCKFILE: ${{ inputs.arg-lockfile }}
+        INPUTS_ARG_MIGRATE_STATE: ${{ inputs.arg-migrate-state }}
+        INPUTS_ARG_NO_TESTS: ${{ inputs.arg-no-tests }}
+        INPUTS_ARG_PARALLELISM: ${{ inputs.arg-parallelism }}
+        INPUTS_ARG_PLUGIN_DIR: ${{ inputs.arg-plugin-dir }}
+        INPUTS_ARG_RECONFIGURE: ${{ inputs.arg-reconfigure }}
+        INPUTS_ARG_RECURSIVE: ${{ inputs.arg-recursive }}
+        INPUTS_ARG_REFRESH_ONLY: ${{ inputs.arg-refresh-only }}
+        INPUTS_ARG_REFRESH: ${{ inputs.arg-refresh }}
+        INPUTS_ARG_REPLACE: ${{ inputs.arg-replace }}
+        INPUTS_ARG_STATE_OUT: ${{ inputs.arg-state-out }}
+        INPUTS_ARG_STATE: ${{ inputs.arg-state }}
+        INPUTS_ARG_TARGET: ${{ inputs.arg-target }}
+        INPUTS_ARG_TEST_DIRECTORY: ${{ inputs.arg-test-directory }}
+        INPUTS_ARG_UPGRADE: ${{ inputs.arg-upgrade }}
+        INPUTS_ARG_VAR_FILE: ${{ inputs.arg-var-file }}
+        INPUTS_ARG_VAR: ${{ inputs.arg-var }}
+        INPUTS_ARG_WRITE: ${{ inputs.arg-write }}
+        INPUTS_TOKEN: ${{ inputs.token }}
+        TF_CLI_ARGS_INPUT: ${{ env.TF_CLI_ARGS }}
+        TF_WORKSPACE: ${{ env.TF_WORKSPACE || inputs.arg-workspace }}
+      shell: bash
+      run: |
+        # Populate variables.
+        # Helper: sanitize a value and write key=value to GITHUB_OUTPUT.
+        safe_output() {
+          local key="$1"
+          local val="$2"
+          local safe_val
+          safe_val=$(printf '%s' "$val" | tr -d '\n\r')
+          printf '%s=%s\n' "$key" "$safe_val" >> "$GITHUB_OUTPUT"
+        }
+
+        # Environment variables.
+        echo "GH_API=X-GitHub-Api-Version:2022-11-28" >> "$GITHUB_ENV"
+        safe_token=$(printf '%s' "$INPUTS_TOKEN" | tr -d '\n\r')
+        echo "GH_TOKEN=$safe_token" >> "$GITHUB_ENV"
+        if [[ -n "$TF_CLI_ARGS_INPUT" ]]; then
+          safe_tf_cli_args=$(printf '%s' "$TF_CLI_ARGS_INPUT -no-color" | tr -d '\n\r')
+        else
+          safe_tf_cli_args="-no-color"
+        fi
+        echo "TF_CLI_ARGS=$safe_tf_cli_args" >> "$GITHUB_ENV"
+        echo "TF_IN_AUTOMATION=true" >> "$GITHUB_ENV"
+        echo "TF_INPUT=false" >> "$GITHUB_ENV"
+        safe_tf_workspace=$(printf '%s' "$TF_WORKSPACE" | tr -d '\n\r')
+        echo "TF_WORKSPACE=$safe_tf_workspace" >> "$GITHUB_ENV"
+        safe_gh_host=$(printf '%s' "$GITHUB_SERVER_URL" | sed 's/.*:\/\///' | tr -d '\n\r')
+        echo "GH_HOST=$safe_gh_host" >> "$GITHUB_ENV"
+
+        # CLI arguments.
+        safe_output "arg-auto-approve" "$([[ -n "$INPUTS_ARG_AUTO_APPROVE" ]] && echo " -auto-approve" || echo "")"
+        safe_output "arg-backend-config" "$([[ -n "$INPUTS_ARG_BACKEND_CONFIG" ]] && echo " -backend-config=$INPUTS_ARG_BACKEND_CONFIG" | sed "s/,/ -backend-config=/g" || echo "")"
+        safe_output "arg-backend" "$([[ -n "$INPUTS_ARG_BACKEND" ]] && echo " -backend=$INPUTS_ARG_BACKEND" || echo "")"
+        safe_output "arg-backup" "$([[ -n "$INPUTS_ARG_BACKUP" ]] && echo " -backup=$INPUTS_ARG_BACKUP" || echo "")"
+        safe_output "arg-chdir" "$([[ -n "$INPUTS_ARG_CHDIR" ]] && echo " -chdir=$INPUTS_ARG_CHDIR" || echo "")"
+        safe_output "arg-check" "$([[ -n "$INPUTS_ARG_CHECK" ]] && echo " -check" || echo "")"
+        safe_output "arg-compact-warnings" "$([[ -n "$INPUTS_ARG_COMPACT_WARNINGS" ]] && echo " -compact-warnings" || echo "")"
+        safe_output "arg-concise" "$([[ -n "$INPUTS_ARG_CONCISE" ]] && echo " -concise" || echo "")"
+        safe_output "arg-destroy" "$([[ -n "$INPUTS_ARG_DESTROY" ]] && echo " -destroy" || echo "")"
+        safe_output "arg-detailed-exitcode" "$([[ -n "$INPUTS_ARG_DETAILED_EXITCODE" ]] && echo " -detailed-exitcode" || echo "")"
+        safe_output "arg-diff" "$([[ -n "$INPUTS_ARG_DIFF" ]] && echo " -diff" || echo "")"
+        safe_output "arg-force-copy" "$([[ -n "$INPUTS_ARG_FORCE_COPY" ]] && echo " -force-copy" || echo "")"
+        safe_output "arg-from-module" "$([[ -n "$INPUTS_ARG_FROM_MODULE" ]] && echo " -from-module=$INPUTS_ARG_FROM_MODULE" || echo "")"
+        safe_output "arg-generate-config-out" "$([[ -n "$INPUTS_ARG_GENERATE_CONFIG_OUT" ]] && echo " -generate-config-out=$INPUTS_ARG_GENERATE_CONFIG_OUT" || echo "")"
+        safe_output "arg-get" "$([[ -n "$INPUTS_ARG_GET" ]] && echo " -get=$INPUTS_ARG_GET" || echo "")"
+        safe_output "arg-list" "$([[ -n "$INPUTS_ARG_LIST" ]] && echo " -list=$INPUTS_ARG_LIST" || echo "")"
+        safe_output "arg-lock-timeout" "$([[ -n "$INPUTS_ARG_LOCK_TIMEOUT" ]] && echo " -lock-timeout=$INPUTS_ARG_LOCK_TIMEOUT" || echo "")"
+        safe_output "arg-lock" "$([[ -n "$INPUTS_ARG_LOCK" ]] && echo " -lock=$INPUTS_ARG_LOCK" || echo "")"
+        safe_output "arg-lockfile" "$([[ -n "$INPUTS_ARG_LOCKFILE" ]] && echo " -lockfile=$INPUTS_ARG_LOCKFILE" || echo "")"
+        safe_output "arg-migrate-state" "$([[ -n "$INPUTS_ARG_MIGRATE_STATE" ]] && echo " -migrate-state" || echo "")"
+        safe_output "arg-no-tests" "$([[ -n "$INPUTS_ARG_NO_TESTS" ]] && echo " -no-tests" || echo "")"
+        safe_output "arg-parallelism" "$([[ -n "$INPUTS_ARG_PARALLELISM" ]] && echo " -parallelism=$INPUTS_ARG_PARALLELISM" || echo "")"
+        safe_output "arg-plugin-dir" "$([[ -n "$INPUTS_ARG_PLUGIN_DIR" ]] && echo " -plugin-dir=$INPUTS_ARG_PLUGIN_DIR" || echo "")"
+        safe_output "arg-reconfigure" "$([[ -n "$INPUTS_ARG_RECONFIGURE" ]] && echo " -reconfigure" || echo "")"
+        safe_output "arg-recursive" "$([[ -n "$INPUTS_ARG_RECURSIVE" ]] && echo " -recursive" || echo "")"
+        safe_output "arg-refresh-only" "$([[ -n "$INPUTS_ARG_REFRESH_ONLY" ]] && echo " -refresh-only" || echo "")"
+        safe_output "arg-refresh" "$([[ -n "$INPUTS_ARG_REFRESH" ]] && echo " -refresh=$INPUTS_ARG_REFRESH" || echo "")"
+        safe_output "arg-replace" "$([[ -n "$INPUTS_ARG_REPLACE" ]] && echo " -replace=$INPUTS_ARG_REPLACE" | sed "s/,/ -replace=/g" || echo "")"
+        safe_output "arg-state-out" "$([[ -n "$INPUTS_ARG_STATE_OUT" ]] && echo " -state-out=$INPUTS_ARG_STATE_OUT" || echo "")"
+        safe_output "arg-state" "$([[ -n "$INPUTS_ARG_STATE" ]] && echo " -state=$INPUTS_ARG_STATE" || echo "")"
+        safe_output "arg-target" "$([[ -n "$INPUTS_ARG_TARGET" ]] && echo " -target=$INPUTS_ARG_TARGET" | sed "s/,/ -target=/g" || echo "")"
+        safe_output "arg-test-directory" "$([[ -n "$INPUTS_ARG_TEST_DIRECTORY" ]] && echo " -test-directory=$INPUTS_ARG_TEST_DIRECTORY" || echo "")"
+        safe_output "arg-upgrade" "$([[ -n "$INPUTS_ARG_UPGRADE" ]] && echo " -upgrade" || echo "")"
+        safe_output "arg-var-file" "$([[ -n "$INPUTS_ARG_VAR_FILE" ]] && echo " -var-file=$INPUTS_ARG_VAR_FILE" | sed "s/,/ -var-file=/g" || echo "")"
+        safe_output "arg-var" "$([[ -n "$INPUTS_ARG_VAR" ]] && echo " -var=$INPUTS_ARG_VAR" | sed "s/,/ -var=/g" || echo "")"
+        safe_output "arg-write" "$([[ -n "$INPUTS_ARG_WRITE" ]] && echo " -write=$INPUTS_ARG_WRITE" || echo "")"
+        safe_output "arg-workspace" "$([[ -n "$TF_WORKSPACE" ]] && echo " -workspace=$TF_WORKSPACE" || echo "")"
+    - id: identifier
+      env:
+        INPUTS_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUTS_TOOL: ${{ inputs.tool }}
+        GH_REPOSITORY: ${{ github.repository }}
+        GH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        GH_REF_NAME: ${{ github.ref_name }}
+        GH_HEAD_REF: ${{ github.head_ref }}
+        GH_REF: ${{ github.ref }}
+        GH_EVENT_NUMBER: ${{ github.event.number }}
+        GH_EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_WORKSPACE: ${{ steps.arg.outputs.arg-workspace }}
+        STEPS_ARG_BACKEND_CONFIG: ${{ steps.arg.outputs.arg-backend-config }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_REPLACE: ${{ steps.arg.outputs.arg-replace }}
+        STEPS_ARG_TARGET: ${{ steps.arg.outputs.arg-target }}
+        STEPS_ARG_DESTROY: ${{ steps.arg.outputs.arg-destroy }}
+      shell: bash
+      run: |
+        # Unique identifier.
+        # Get PR number using GitHub API for different event triggers.
+        if [[ "$INPUTS_PR_NUMBER" != "" ]]; then
+          # Use provided PR number if specified.
+          pr_number="$INPUTS_PR_NUMBER"
+        elif [[ "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "repository_dispatch" || "$GITHUB_EVENT_NAME" == "workflow_call" || "$GITHUB_EVENT_NAME" == "workflow_dispatch" || "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+          # List PRs associated with the commit, then get the PR number from the head ref or the latest PR.
+          associated_prs=$(gh api /repos/"$GH_REPOSITORY"/commits/"$GH_SHA"/pulls --header "$GH_API" --method GET --paginate)
+          pr_number=$(echo "$associated_prs" | jq --raw-output '(.[] | select(.head.ref == env.GITHUB_REF_NAME) | .number) // .[0].number // 0')
+        elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+          # Get the PR number by parsing the ref name.
+          pr_number=$(echo "$GH_REF_NAME" | sed -n 's/.*pr-\([0-9]*\)-.*/\1/p')
+        else
+          # Get the PR number from branch name, otherwise fallback on 0 if the PR number is not found.
+          pr_number="${GH_EVENT_NUMBER:-${GH_EVENT_ISSUE_NUMBER:-}}"
+          if [[ -z "$pr_number" ]]; then
+            head_ref="${GH_REF_NAME:-${GH_HEAD_REF:-${GH_REF:-0}}}"
+            pr_number=$(gh api /repos/"$GH_REPOSITORY"/pulls --header "$GH_API" --method GET --paginate --field head="$head_ref" | jq '.[0].number // 0')
+          fi
+        fi
+        safe_pr=$(printf '%s' "${pr_number:-0}" | tr -d '\n\r')
+        echo "pr=${safe_pr}" >> "$GITHUB_OUTPUT"
+
+        # Generate identifier for the workflow run using MD5 hashing algorithm for concise and unique naming.
+        identifier="${STEPS_ARG_CHDIR}${STEPS_ARG_WORKSPACE}${STEPS_ARG_BACKEND_CONFIG}${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}${STEPS_ARG_REPLACE}${STEPS_ARG_TARGET}${STEPS_ARG_DESTROY}"
+        identifier=$(echo -n "$identifier" | md5sum | awk '{print $1}')
+        safe_tool=$(printf '%s' "$INPUTS_TOOL" | tr -d '\n\r')
+        safe_name=$(printf '%s' "${safe_tool}-${safe_pr}-${identifier}.tfplan" | tr -d '\n\r')
+        echo "name=${safe_name}" >> "$GITHUB_OUTPUT"
+    - if: ${{ inputs.format == 'true' }}
+      id: format
+      env:
+        INPUTS_TOOL: ${{ inputs.tool }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_CHECK: ${{ steps.arg.outputs.arg-check }}
+        STEPS_ARG_DIFF: ${{ steps.arg.outputs.arg-diff }}
+        STEPS_ARG_LIST: ${{ steps.arg.outputs.arg-list }}
+        STEPS_ARG_RECURSIVE: ${{ steps.arg.outputs.arg-recursive }}
+        STEPS_ARG_WRITE: ${{ steps.arg.outputs.arg-write }}
+      shell: bash
+      run: |
+        # TF format.
+        trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
+        args="${STEPS_ARG_CHECK}${STEPS_ARG_DIFF}${STEPS_ARG_LIST}${STEPS_ARG_RECURSIVE}${STEPS_ARG_WRITE}"
+        echo "$INPUTS_TOOL fmt${STEPS_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
+        read -ra cmd_args <<< "${STEPS_ARG_CHDIR} fmt${args}"
+        "$INPUTS_TOOL" "${cmd_args[@]}" 2> >(tee tf.console.txt) > >(tee tf.console.txt)
+    - if: ${{ contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
+      id: initialize
+      env:
+        INPUTS_TOOL: ${{ inputs.tool }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_BACKEND_CONFIG: ${{ steps.arg.outputs.arg-backend-config }}
+        STEPS_ARG_BACKEND: ${{ steps.arg.outputs.arg-backend }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_FORCE_COPY: ${{ steps.arg.outputs.arg-force-copy }}
+        STEPS_ARG_FROM_MODULE: ${{ steps.arg.outputs.arg-from-module }}
+        STEPS_ARG_GET: ${{ steps.arg.outputs.arg-get }}
+        STEPS_ARG_LOCK_TIMEOUT: ${{ steps.arg.outputs.arg-lock-timeout }}
+        STEPS_ARG_LOCK: ${{ steps.arg.outputs.arg-lock }}
+        STEPS_ARG_LOCKFILE: ${{ steps.arg.outputs.arg-lockfile }}
+        STEPS_ARG_MIGRATE_STATE: ${{ steps.arg.outputs.arg-migrate-state }}
+        STEPS_ARG_PLUGIN_DIR: ${{ steps.arg.outputs.arg-plugin-dir }}
+        STEPS_ARG_RECONFIGURE: ${{ steps.arg.outputs.arg-reconfigure }}
+        STEPS_ARG_TEST_DIRECTORY: ${{ steps.arg.outputs.arg-test-directory }}
+        STEPS_ARG_UPGRADE: ${{ steps.arg.outputs.arg-upgrade }}
+      shell: bash
+      run: |
+        # TF initialize.
+        trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
+        tofu_var_args=""
+        if [[ "$INPUTS_TOOL" == "tofu" ]]; then
+          tofu_var_args="${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}"
+        fi
+        args="${STEPS_ARG_BACKEND_CONFIG}${STEPS_ARG_BACKEND}${tofu_var_args}${STEPS_ARG_FORCE_COPY}${STEPS_ARG_FROM_MODULE}${STEPS_ARG_GET}${STEPS_ARG_LOCK_TIMEOUT}${STEPS_ARG_LOCK}${STEPS_ARG_LOCKFILE}${STEPS_ARG_MIGRATE_STATE}${STEPS_ARG_PLUGIN_DIR}${STEPS_ARG_RECONFIGURE}${STEPS_ARG_TEST_DIRECTORY}${STEPS_ARG_UPGRADE}"
+        echo "$INPUTS_TOOL init${STEPS_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
+        read -ra cmd_args <<< "${STEPS_ARG_CHDIR} init${args}"
+        "$INPUTS_TOOL" "${cmd_args[@]}" 2> >(tee tf.console.txt) > >(tee tf.console.txt)
+    - if: ${{ inputs.validate == 'true' && contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
+      id: validate
+      env:
+        INPUTS_TOOL: ${{ inputs.tool }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_NO_TESTS: ${{ steps.arg.outputs.arg-no-tests }}
+        STEPS_ARG_TEST_DIRECTORY: ${{ steps.arg.outputs.arg-test-directory }}
+      shell: bash
+      run: |
+        # TF validate.
+        trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
+        tofu_var_args=""
+        if [[ "$INPUTS_TOOL" == "tofu" ]]; then
+          tofu_var_args="${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}"
+        fi
+        args="${tofu_var_args}${STEPS_ARG_NO_TESTS}${STEPS_ARG_TEST_DIRECTORY}"
+        echo "$INPUTS_TOOL validate${STEPS_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
+        read -ra cmd_args <<< "${STEPS_ARG_CHDIR} validate${args}"
+        "$INPUTS_TOOL" "${cmd_args[@]}" 2> >(tee tf.console.txt) > >(tee tf.console.txt)
+    - if: ${{ inputs.command == 'plan' }}
+      id: plan
+      env:
+        INPUTS_PLAN_FILE: ${{ inputs.plan-file }}
+        INPUTS_TOOL: ${{ inputs.tool }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_DESTROY: ${{ steps.arg.outputs.arg-destroy }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_COMPACT_WARNINGS: ${{ steps.arg.outputs.arg-compact-warnings }}
+        STEPS_ARG_CONCISE: ${{ steps.arg.outputs.arg-concise }}
+        STEPS_ARG_DETAILED_EXITCODE: ${{ steps.arg.outputs.arg-detailed-exitcode }}
+        STEPS_ARG_GENERATE_CONFIG_OUT: ${{ steps.arg.outputs.arg-generate-config-out }}
+        STEPS_ARG_LOCK_TIMEOUT: ${{ steps.arg.outputs.arg-lock-timeout }}
+        STEPS_ARG_LOCK: ${{ steps.arg.outputs.arg-lock }}
+        STEPS_ARG_PARALLELISM: ${{ steps.arg.outputs.arg-parallelism }}
+        STEPS_ARG_REFRESH_ONLY: ${{ steps.arg.outputs.arg-refresh-only }}
+        STEPS_ARG_REFRESH: ${{ steps.arg.outputs.arg-refresh }}
+        STEPS_ARG_REPLACE: ${{ steps.arg.outputs.arg-replace }}
+        STEPS_ARG_TARGET: ${{ steps.arg.outputs.arg-target }}
+      shell: bash
+      run: |
+        # TF plan.
+        trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"; if [[ "$exit_code" == "2" ]]; then exit 0; fi' EXIT
+        args="${STEPS_ARG_DESTROY}${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}${STEPS_ARG_COMPACT_WARNINGS}${STEPS_ARG_CONCISE}${STEPS_ARG_DETAILED_EXITCODE}${STEPS_ARG_GENERATE_CONFIG_OUT}${STEPS_ARG_LOCK_TIMEOUT}${STEPS_ARG_LOCK}${STEPS_ARG_PARALLELISM}${STEPS_ARG_REFRESH_ONLY}${STEPS_ARG_REFRESH}${STEPS_ARG_REPLACE}${STEPS_ARG_TARGET} -out=tfplan"
+        echo "$INPUTS_TOOL plan${STEPS_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
+        if [[ -n "$INPUTS_PLAN_FILE" ]]; then mv --force --verbose "$INPUTS_PLAN_FILE" "$path" 2>/dev/null && exit 0; fi
+        read -ra cmd_args <<< "${STEPS_ARG_CHDIR} plan${args}"
+        "$INPUTS_TOOL" "${cmd_args[@]}" 2> >(tee tf.console.txt) > >(tee tf.console.txt)
+    - if: ${{ inputs.command == 'apply' && inputs.arg-auto-approve != 'true' && inputs.plan-file == '' }}
+      id: download
+      env:
+        INPUTS_ARG_CHDIR: ${{ inputs.arg-chdir || inputs.working-directory }}
+        GH_REPOSITORY: ${{ github.repository }}
+        STEPS_IDENTIFIER_NAME: ${{ steps.identifier.outputs.name }}
+      shell: bash
+      run: |
+        # Download plan file.
+        # Get the artifact ID of the latest matching plan files for download.
+        artifact_id=$(gh api /repos/"$GH_REPOSITORY"/actions/artifacts --header "$GH_API" --method GET --field "name=$STEPS_IDENTIFIER_NAME" --jq '.artifacts[0].id' 2>/dev/null)
+        if [[ -z "$artifact_id" ]]; then echo "Unable to locate plan file: $STEPS_IDENTIFIER_NAME." && exit 1; fi
+        gh api /repos/"$GH_REPOSITORY"/actions/artifacts/${artifact_id}/zip --header "$GH_API" --method GET > "${STEPS_IDENTIFIER_NAME}.zip"
+
+        # Unzip the plan file to the working directory, then clean up the zip file.
+        unzip "${STEPS_IDENTIFIER_NAME}.zip" -d "$INPUTS_ARG_CHDIR"
+        rm --force "${STEPS_IDENTIFIER_NAME}.zip"
+    - if: ${{ inputs.plan-encrypt != '' && steps.download.outcome == 'success' }}
+      env:
+        pass: ${{ inputs.plan-encrypt }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+      shell: bash
+      run: |
+        # Decrypt plan file.
+        temp_file=$(mktemp)
+        printf "%s" "$pass" > "$temp_file"
+        openssl enc -aes-256-ctr -pbkdf2 -salt -in "$path.encrypted" -out "$path.decrypted" -pass file:"$temp_file" -d
+        mv --force --verbose "$path.decrypted" "$path"
+    - if: ${{ steps.plan.outcome == 'success' || steps.download.outcome == 'success' }}
+      env:
+        INPUTS_TOOL: ${{ inputs.tool }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+      shell: bash
+      run: |
+        # TF show.
+        read -ra chdir_args <<< "${STEPS_ARG_CHDIR}"
+        "$INPUTS_TOOL" "${chdir_args[@]}" show tfplan > tf.console.txt
+
+        # Diff of changes.
+        # Filter lines starting with "  # " and save to tf.diff.txt, then prepend diff-specific symbols based on specific keywords.
+        grep '^  # ' tf.console.txt | sed \
+          -e 's/^  # \(.* be created\)/+ \1/' \
+          -e 's/^  # \(.* be destroyed\)/- \1/' \
+          -e 's/^  # \(.* be updated\|.* be replaced\)/! \1/' \
+          -e 's/^  # \(.* be read\)/~ \1/' \
+          -e 's/^  # \(.*\)/# \1/' > tf.diff.txt || true
+    - if: ${{ inputs.plan-encrypt != '' && steps.plan.outcome == 'success' }}
+      env:
+        INPUTS_PRESERVE_PLAN: ${{ inputs.preserve-plan }}
+        pass: ${{ inputs.plan-encrypt }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+      shell: bash
+      run: |
+        # Encrypt plan file.
+        temp_file=$(mktemp)
+        printf "%s" "$pass" > "$temp_file"
+        openssl enc -aes-256-ctr -pbkdf2 -salt -in "$path" -out "$path.encrypted" -pass file:"$temp_file"
+
+        # Optionally delete the plan file.
+        if [[ "$INPUTS_PRESERVE_PLAN" != "true" ]]; then
+          rm --force "$path"
+        fi
+    - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && (github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
+      id: upload
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ steps.identifier.outputs.name }}
+        path: ${{ format('{0}{1}tfplan{2}', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '', inputs.plan-encrypt != '' && '.encrypted' || '') }}
+        retention-days: ${{ inputs.retention-days }}
+        overwrite: true
+    - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && !(github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
+      id: upload-v3
+      uses: actions/upload-artifact@c24449f33cd45d4826c6702db7e49f7cdb9b551d # v3.2.1-node20
+      with:
+        name: ${{ steps.identifier.outputs.name }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        retention-days: ${{ inputs.retention-days }}
+    - if: ${{ inputs.plan-parity == 'true' && (steps.download.outcome == 'success' || inputs.plan-file != '') }}
+      env:
+        INPUTS_ARG_CHDIR: ${{ inputs.arg-chdir || inputs.working-directory }}
+        INPUTS_PLAN_FILE: ${{ inputs.plan-file }}
+        INPUTS_TOOL: ${{ inputs.tool }}
+        parity_path: ${{ format('{0}{1}tfplan.parity', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_DESTROY: ${{ steps.arg.outputs.arg-destroy }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_COMPACT_WARNINGS: ${{ steps.arg.outputs.arg-compact-warnings }}
+        STEPS_ARG_CONCISE: ${{ steps.arg.outputs.arg-concise }}
+        STEPS_ARG_GENERATE_CONFIG_OUT: ${{ steps.arg.outputs.arg-generate-config-out }}
+        STEPS_ARG_LOCK_TIMEOUT: ${{ steps.arg.outputs.arg-lock-timeout }}
+        STEPS_ARG_LOCK: ${{ steps.arg.outputs.arg-lock }}
+        STEPS_ARG_PARALLELISM: ${{ steps.arg.outputs.arg-parallelism }}
+        STEPS_ARG_REFRESH_ONLY: ${{ steps.arg.outputs.arg-refresh-only }}
+        STEPS_ARG_REFRESH: ${{ steps.arg.outputs.arg-refresh }}
+        STEPS_ARG_REPLACE: ${{ steps.arg.outputs.arg-replace }}
+        STEPS_ARG_TARGET: ${{ steps.arg.outputs.arg-target }}
+      shell: bash
+      run: |
+        # TF plan parity.
+        # Generate a new plan file, then compare it with the previous one.
+        # Both plan files are normalized by sorting JSON keys, removing timestamps and detailed-exitcode to avoid false-positives.
+        if [[ -n "$INPUTS_PLAN_FILE" ]]; then mv --force --verbose "$INPUTS_PLAN_FILE" "$path" 2>/dev/null; fi
+        read -ra parity_plan_args <<< "${STEPS_ARG_CHDIR} plan${STEPS_ARG_DESTROY}${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}${STEPS_ARG_COMPACT_WARNINGS}${STEPS_ARG_CONCISE}${STEPS_ARG_GENERATE_CONFIG_OUT}${STEPS_ARG_LOCK_TIMEOUT}${STEPS_ARG_LOCK}${STEPS_ARG_PARALLELISM}${STEPS_ARG_REFRESH_ONLY}${STEPS_ARG_REFRESH}${STEPS_ARG_REPLACE}${STEPS_ARG_TARGET} -out=tfplan.parity"
+        "$INPUTS_TOOL" "${parity_plan_args[@]}"
+        read -ra chdir_args <<< "${STEPS_ARG_CHDIR}"
+        "$INPUTS_TOOL" "${chdir_args[@]}" show -json tfplan.parity | jq --sort-keys '[(.resource_changes? // [])[] | select(.change.actions != ["no-op"])]' > tfplan.new
+        "$INPUTS_TOOL" "${chdir_args[@]}" show -json tfplan | jq --sort-keys '[(.resource_changes? // [])[] | select(.change.actions != ["no-op"])]' > tfplan.old
+        # If both plan files are identical, then replace the old plan file with the new one to prevent avoidable stale apply.
+        diff --brief tfplan.new tfplan.old && mv --force --verbose "$parity_path" "$path"
+        rm --force tfplan.new tfplan.old "$parity_path"
+    - if: ${{ inputs.command == 'apply' }}
+      id: apply
+      env:
+        INPUTS_ARG_AUTO_APPROVE: ${{ inputs.arg-auto-approve }}
+        INPUTS_PLAN_FILE: ${{ inputs.plan-file }}
+        INPUTS_PLAN_PARITY: ${{ inputs.plan-parity }}
+        INPUTS_TOOL: ${{ inputs.tool }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        STEPS_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
+        STEPS_ARG_AUTO_APPROVE: ${{ steps.arg.outputs.arg-auto-approve }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_DESTROY: ${{ steps.arg.outputs.arg-destroy }}
+        STEPS_ARG_BACKUP: ${{ steps.arg.outputs.arg-backup }}
+        STEPS_ARG_COMPACT_WARNINGS: ${{ steps.arg.outputs.arg-compact-warnings }}
+        STEPS_ARG_CONCISE: ${{ steps.arg.outputs.arg-concise }}
+        STEPS_ARG_LOCK_TIMEOUT: ${{ steps.arg.outputs.arg-lock-timeout }}
+        STEPS_ARG_LOCK: ${{ steps.arg.outputs.arg-lock }}
+        STEPS_ARG_PARALLELISM: ${{ steps.arg.outputs.arg-parallelism }}
+        STEPS_ARG_REFRESH_ONLY: ${{ steps.arg.outputs.arg-refresh-only }}
+        STEPS_ARG_REFRESH: ${{ steps.arg.outputs.arg-refresh }}
+        STEPS_ARG_REPLACE: ${{ steps.arg.outputs.arg-replace }}
+        STEPS_ARG_STATE_OUT: ${{ steps.arg.outputs.arg-state-out }}
+        STEPS_ARG_STATE: ${{ steps.arg.outputs.arg-state }}
+        STEPS_ARG_TARGET: ${{ steps.arg.outputs.arg-target }}
+      shell: bash
+      run: |
+        # TF apply.
+        trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
+        # If arg-auto-approve is true, then pass in variables, otherwise pass in the plan file without variables.
+        if [[ "$INPUTS_ARG_AUTO_APPROVE" == "true" ]]; then
+          plan="$STEPS_ARG_AUTO_APPROVE"
+          var_file="$STEPS_ARG_VAR_FILE"
+          var="$STEPS_ARG_VAR"
+        else
+          if [[ -n "$INPUTS_PLAN_FILE" && "$INPUTS_PLAN_PARITY" != "true" ]]; then mv --force --verbose "$INPUTS_PLAN_FILE" "$path" 2>/dev/null; fi
+          plan=" tfplan"
+          var_file=""
+          var=""
+        fi
+        args="${STEPS_ARG_DESTROY}${var_file}${var}${STEPS_ARG_BACKUP}${STEPS_ARG_COMPACT_WARNINGS}${STEPS_ARG_CONCISE}${STEPS_ARG_LOCK_TIMEOUT}${STEPS_ARG_LOCK}${STEPS_ARG_PARALLELISM}${STEPS_ARG_REFRESH_ONLY}${STEPS_ARG_REFRESH}${STEPS_ARG_REPLACE}${STEPS_ARG_STATE_OUT}${STEPS_ARG_STATE}${STEPS_ARG_TARGET}${plan}"
+        echo "$INPUTS_TOOL apply${STEPS_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
+        read -ra cmd_args <<< "${STEPS_ARG_CHDIR} apply${args}"
+        "$INPUTS_TOOL" "${cmd_args[@]}" 2> >(tee tf.console.txt) > >(tee tf.console.txt)
+    - if: ${{ !cancelled() && steps.identifier.outcome == 'success' && contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
+      id: post
+      env:
+        exitcode: ${{ steps.apply.outputs.exit_code || steps.plan.outputs.exit_code || steps.validate.outputs.exit_code || steps.initialize.outputs.exit_code || steps.format.outputs.exit_code }}
+        GH_MATRIX: ${{ toJSON(matrix) }}
+        INPUTS_COMMAND: ${{ inputs.command }}
+        INPUTS_COMMENT_METHOD: ${{ inputs.comment-method }}
+        INPUTS_COMMENT_PR: ${{ inputs.comment-pr }}
+        INPUTS_EXPAND_DIFF: ${{ inputs.expand-diff }}
+        INPUTS_EXPAND_SUMMARY: ${{ inputs.expand-summary }}
+        INPUTS_HIDE_ARGS: ${{ inputs.hide-args }}
+        INPUTS_PRESERVE_PLAN: ${{ inputs.preserve-plan }}
+        INPUTS_SHOW_ARGS: ${{ inputs.show-args }}
+        INPUTS_TAG_ACTOR: ${{ inputs.tag-actor }}
+        path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
+        GH_REPOSITORY: ${{ github.repository }}
+        GH_RUN_ID: ${{ github.run_id }}
+        GH_RUN_ATTEMPT: ${{ github.run_attempt }}
+        GH_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        GH_EVENT_TIMESTAMP: ${{ github.event.pull_request.updated_at || github.event.comment.created_at || github.event.head_commit.timestamp || github.event.merge_group.head_commit.timestamp }}
+        STEPS_FORMAT_OUTCOME: ${{ steps.format.outcome }}
+        STEPS_IDENTIFIER_NAME: ${{ steps.identifier.outputs.name }}
+        STEPS_IDENTIFIER_PR: ${{ steps.identifier.outputs.pr }}
+        STEPS_ARG_WORKSPACE: ${{ steps.arg.outputs.arg-workspace }}
+        STEPS_ARG_BACKEND_CONFIG: ${{ steps.arg.outputs.arg-backend-config }}
+        STEPS_ARG_BACKEND: ${{ steps.arg.outputs.arg-backend }}
+        STEPS_ARG_BACKUP: ${{ steps.arg.outputs.arg-backup }}
+        STEPS_ARG_CHECK: ${{ steps.arg.outputs.arg-check }}
+        STEPS_ARG_COMPACT_WARNINGS: ${{ steps.arg.outputs.arg-compact-warnings }}
+        STEPS_ARG_CONCISE: ${{ steps.arg.outputs.arg-concise }}
+        STEPS_ARG_DESTROY: ${{ steps.arg.outputs.arg-destroy }}
+        STEPS_ARG_DETAILED_EXITCODE: ${{ steps.arg.outputs.arg-detailed-exitcode }}
+        STEPS_ARG_DIFF: ${{ steps.arg.outputs.arg-diff }}
+        STEPS_ARG_FORCE_COPY: ${{ steps.arg.outputs.arg-force-copy }}
+        STEPS_ARG_FROM_MODULE: ${{ steps.arg.outputs.arg-from-module }}
+        STEPS_ARG_GENERATE_CONFIG_OUT: ${{ steps.arg.outputs.arg-generate-config-out }}
+        STEPS_ARG_GET: ${{ steps.arg.outputs.arg-get }}
+        STEPS_ARG_LIST: ${{ steps.arg.outputs.arg-list }}
+        STEPS_ARG_LOCK_TIMEOUT: ${{ steps.arg.outputs.arg-lock-timeout }}
+        STEPS_ARG_LOCK: ${{ steps.arg.outputs.arg-lock }}
+        STEPS_ARG_LOCKFILE: ${{ steps.arg.outputs.arg-lockfile }}
+        STEPS_ARG_MIGRATE_STATE: ${{ steps.arg.outputs.arg-migrate-state }}
+        STEPS_ARG_NO_TESTS: ${{ steps.arg.outputs.arg-no-tests }}
+        STEPS_ARG_PARALLELISM: ${{ steps.arg.outputs.arg-parallelism }}
+        STEPS_ARG_PLUGIN_DIR: ${{ steps.arg.outputs.arg-plugin-dir }}
+        STEPS_ARG_RECONFIGURE: ${{ steps.arg.outputs.arg-reconfigure }}
+        STEPS_ARG_RECURSIVE: ${{ steps.arg.outputs.arg-recursive }}
+        STEPS_ARG_REFRESH_ONLY: ${{ steps.arg.outputs.arg-refresh-only }}
+        STEPS_ARG_REFRESH: ${{ steps.arg.outputs.arg-refresh }}
+        STEPS_ARG_REPLACE: ${{ steps.arg.outputs.arg-replace }}
+        STEPS_ARG_STATE_OUT: ${{ steps.arg.outputs.arg-state-out }}
+        STEPS_ARG_STATE: ${{ steps.arg.outputs.arg-state }}
+        STEPS_ARG_TARGET: ${{ steps.arg.outputs.arg-target }}
+        STEPS_ARG_TEST_DIRECTORY: ${{ steps.arg.outputs.arg-test-directory }}
+        STEPS_ARG_UPGRADE: ${{ steps.arg.outputs.arg-upgrade }}
+        STEPS_ARG_VAR_FILE: ${{ steps.arg.outputs.arg-var-file }}
+        STEPS_ARG_VAR: ${{ steps.arg.outputs.arg-var }}
+        STEPS_ARG_WRITE: ${{ steps.arg.outputs.arg-write }}
+        STEPS_ARG_AUTO_APPROVE: ${{ steps.arg.outputs.arg-auto-approve }}
+      shell: bash
+      run: |
+        # Post output.
+        # Parse the "tf.command.txt" file.
+        command=$(cat tf.command.txt)
+
+        # Remove each comma-delimited "hide-args" argument from the command.
+        IFS=',' read -ra hide_args <<< "$INPUTS_HIDE_ARGS"
+        for arg in "${hide_args[@]}"; do
+          command=$(echo "$command" | grep --invert-match "^ -${arg}" || true)
+        done
+
+        # Conversely, show each comma-delimited "show-args" argument in the command.
+        command_append=""
+        all_args="${STEPS_ARG_WORKSPACE}${STEPS_ARG_BACKEND_CONFIG}${STEPS_ARG_BACKEND}${STEPS_ARG_BACKUP}${STEPS_ARG_CHECK}${STEPS_ARG_COMPACT_WARNINGS}${STEPS_ARG_CONCISE}${STEPS_ARG_DESTROY}${STEPS_ARG_DETAILED_EXITCODE}${STEPS_ARG_DIFF}${STEPS_ARG_FORCE_COPY}${STEPS_ARG_FROM_MODULE}${STEPS_ARG_GENERATE_CONFIG_OUT}${STEPS_ARG_GET}${STEPS_ARG_LIST}${STEPS_ARG_LOCK_TIMEOUT}${STEPS_ARG_LOCK}${STEPS_ARG_LOCKFILE}${STEPS_ARG_MIGRATE_STATE}${STEPS_ARG_NO_TESTS}${STEPS_ARG_PARALLELISM}${STEPS_ARG_PLUGIN_DIR}${STEPS_ARG_RECONFIGURE}${STEPS_ARG_RECURSIVE}${STEPS_ARG_REFRESH_ONLY}${STEPS_ARG_REFRESH}${STEPS_ARG_REPLACE}${STEPS_ARG_STATE_OUT}${STEPS_ARG_STATE}${STEPS_ARG_TARGET}${STEPS_ARG_TEST_DIRECTORY}${STEPS_ARG_UPGRADE}${STEPS_ARG_VAR_FILE}${STEPS_ARG_VAR}${STEPS_ARG_WRITE}${STEPS_ARG_AUTO_APPROVE}"
+        IFS=',' read -ra show_args <<< "$INPUTS_SHOW_ARGS"
+        for arg in "${show_args[@]}"; do
+          command_append+=$(echo "$all_args" | sed 's/ -/\n -/g' | grep "^ -${arg}" || true)
+        done
+
+        # Consolidate 'command', taking both "hide-args" and "show-args" into account.
+        command=$(echo "$command" | tr -d '\n')$command_append
+        echo "command=$command" >> "$GITHUB_OUTPUT"
+
+        # Parse the "tf.console.txt" file, truncated for character limit.
+        console=$(head --bytes=42000 tf.console.txt)
+        if [[ ${#console} -eq 42000 ]]; then console="${console}"$'\n…'; fi
+        echo "result<<EORESULTTFVIAPR"$'\n'"$console"$'\n'EORESULTTFVIAPR >> "$GITHUB_OUTPUT"
+
+        # Parse the "tf.console.txt" file for the summary.
+        summary=$(awk '/^(Error:|Plan:|Apply complete!|No changes.|Success)/ {line=$0} END {if (line) print line; else print "View output."}' tf.console.txt)
+        echo "summary=$summary" >> "$GITHUB_OUTPUT"
+
+        # If "steps.format.outcome" failed, set syntax highlighting to "diff", otherwise set it to "hcl".
+        syntax="hcl"
+        if [[ "$STEPS_FORMAT_OUTCOME" == "failure" ]]; then syntax="diff"; fi
+
+        # List jobs from the current workflow run.
+        workflow_run=$(gh api /repos/"$GH_REPOSITORY"/actions/runs/"$GH_RUN_ID"/attempts/"$GH_RUN_ATTEMPT"/jobs --header "$GH_API" --method GET --paginate)
+
+        # Get the current job ID from the workflow run using different query methods for matrix and regular jobs.
+        if [[ "$GH_MATRIX" == "null" ]]; then
+          # For regular jobs, get the ID of the job with the same name as job_id (lowercase and '-' or '_' replaced with ' ').
+          # Otherwise, get the ID of the first job in the list as a fallback.
+          job_id=$(echo "$workflow_run" | jq --raw-output '(.jobs[] | select((.name | ascii_downcase | gsub("-|_"; " ")) == (env.GITHUB_JOB | ascii_downcase | gsub("-|_"; " "))) | .id) // .jobs[0].id' | tail -n 1)
+        else
+          # For matrix jobs, join the matrix values with comma separator into a single string and get the ID of the job which contains it.
+          matrix=$(echo "$GH_MATRIX" | jq --raw-output 'to_entries | map(if .value | type == "object" then (.value | to_entries[0].value) else .value end) | join(", ")')
+          job_id=$(echo "$workflow_run" | jq --raw-output --arg matrix "$matrix" '.jobs[] | select((.name | contains("(")) and ((.name | split("(")[1]) | rtrimstr(")") | rtrimstr("...") | inside($matrix))) | .id' | tail -n 1)
+          # For dynamic matrix jobs, retry with exponential backoff until the job ID is found or a timeout occurs.
+          retry_interval=1
+          while [[ -z "$job_id" ]]; do
+            if [[ $retry_interval -gt 64 ]]; then
+              echo "Unable to locate job ID for matrix: $matrix."
+              exit 1
+            fi
+            echo "Waiting to locate job ID; will try again in $retry_interval seconds."
+            sleep "$retry_interval"
+            retry_interval=$((retry_interval * 2))
+            workflow_run=$(gh api /repos/"$GH_REPOSITORY"/actions/runs/"$GH_RUN_ID"/attempts/"$GH_RUN_ATTEMPT"/jobs --header "$GH_API" --method GET --paginate)
+            job_id=$(echo "$workflow_run" | jq --raw-output --arg matrix "$matrix" '.jobs[] | select((.name | contains("(")) and ((.name | split("(")[1]) | rtrimstr(")") | rtrimstr("...") | inside($matrix))) | .id' | tail -n 1)
+          done
+        fi
+        echo "job=$job_id" >> "$GITHUB_OUTPUT"
+
+        # Add summary to the job status.
+        check_run=$(gh api /repos/"$GH_REPOSITORY"/check-runs/${job_id} --header "$GH_API" --method PATCH --field "output[title]=${summary}" --field "output[summary]=${summary}")
+
+        # Get the step number that has status "in_progress" from the current job.
+        workflow_step=$(echo "$workflow_run" | jq --raw-output --arg job_id "$job_id" '.jobs[] | select(.id == ($job_id | tonumber)) | .steps[] | select(.status == "in_progress") | .number')
+
+        # From "check_run", echo "html_url".
+        check_url=$(echo "$check_run" | jq --raw-output '.html_url')
+        echo "check_id=$(echo "$check_run" | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"
+        run_url=$(echo ${check_url}#step:${workflow_step}:1)
+        echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+
+        # If "tf.diff.txt" exists, display it within a "diff" block, truncated for character limit.
+        if [[ -s tf.diff.txt ]]; then
+          # Get count of lines in "tf.diff.txt" which do not start with "# ".
+          diff_count=$({ grep --invert-match '^# ' tf.diff.txt || true; } | wc --lines)
+          if [[ $diff_count -eq 1 ]]; then diff_change="change"; else diff_change="changes"; fi
+
+          # Parse diff of changes, truncated for character limit.
+          diff_truncated=$(head --bytes=24000 tf.diff.txt)
+          if [[ ${#diff_truncated} -eq 24000 ]]; then diff_truncated="${diff_truncated}"$'\n…'; fi
+          echo "diff<<EODIFFTFVIAPR"$'\n'"$diff_truncated"$'\n'EODIFFTFVIAPR >> "$GITHUB_OUTPUT"
+
+          expand_diff_attr=""
+          if [[ "$INPUTS_EXPAND_DIFF" == "true" ]]; then expand_diff_attr=" open"; fi
+          diff="
+        <details${expand_diff_attr}><summary>Diff of ${diff_count} ${diff_change}.</summary>
+
+        \`\`\`diff
+        ${diff_truncated}
+        \`\`\`
+        </details>"
+        else
+          diff=""
+        fi
+
+        # Set flags for creating PR comment and tagging actor.
+        create_comment=""
+        tag_actor=""
+        if [[ "$INPUTS_TAG_ACTOR" == "always" || "$INPUTS_TAG_ACTOR" == "true" ]]; then
+          tag_actor="@"
+        elif [[ ("$INPUTS_TAG_ACTOR" == "on-diff" || "$INPUTS_TAG_ACTOR" == "on-change") && "$exitcode" -ne 0 ]]; then
+          tag_actor="@"
+        fi
+
+        expand_summary_attr=""
+        if [[ "$INPUTS_EXPAND_SUMMARY" == "true" ]]; then expand_summary_attr=" open"; fi
+
+        # Collate body content.
+        body=$(cat <<EOBODYTFVIAPR
+        <!-- placeholder-1 -->
+        \`\`\`fish
+        ${command}
+        \`\`\`
+        <!-- placeholder-2 -->
+        ${diff}
+        <!-- placeholder-3 -->
+        <details${expand_summary_attr}><summary>${summary}</br>
+
+        <!-- placeholder-4 -->
+        ###### By ${tag_actor}${GH_TRIGGERING_ACTOR} at ${GH_EVENT_TIMESTAMP} [(view log)](${run_url}).
+        </summary>
+
+        \`\`\`${syntax}
+        ${console}
+        \`\`\`
+        </details>
+        <!-- placeholder-5 -->
+        <!-- ${STEPS_IDENTIFIER_NAME} -->
+        <!-- placeholder-6 -->
+        EOBODYTFVIAPR
+        )
+
+        # Post output to job summary.
+        echo "$body" >> $GITHUB_STEP_SUMMARY
+        echo "comment_body<<EOCOMMENTTFVIAPR"$'\n'"$body"$'\n'EOCOMMENTTFVIAPR >> "$GITHUB_OUTPUT"
+
+        # Optionally delete the plan file.
+        if [[ "$INPUTS_PRESERVE_PLAN" != "true" ]]; then
+          rm --force "$path"
+        fi
+
+        # Clean up files.
+        rm --force tf.command.txt tf.console.txt tf.diff.txt
+
+        # Exit early if there is no PR to comment on.
+        if [[ "$STEPS_IDENTIFIER_PR" -eq 0 ]]; then
+          exit 0
+        fi
+
+        # Check if the PR contains a bot comment with the same identifier.
+        list_comments=$(gh api /repos/"$GH_REPOSITORY"/issues/"$STEPS_IDENTIFIER_PR"/comments --header "$GH_API" --method GET --paginate)
+        bot_comment=$(echo "$list_comments" | jq --raw-output --arg identifier "$STEPS_IDENTIFIER_NAME" '.[] | select(.user.type == "Bot") | select(.body | contains($identifier)) | .id' | tail -n 1)
+
+        # Determine if a PR comment should be created.
+        if [[ "$INPUTS_COMMENT_PR" == "always" ]]; then
+          create_comment="true"
+        elif [[ ("$INPUTS_COMMENT_PR" == "on-diff" || "$INPUTS_COMMENT_PR" == "on-change") && "$exitcode" -ne 0 ]]; then
+          create_comment="true"
+        elif [[ ("$INPUTS_COMMENT_PR" == "on-diff" || "$INPUTS_COMMENT_PR" == "on-change") && "$INPUTS_COMMAND" != "plan" && -n "$bot_comment" ]]; then
+          create_comment="true"
+        elif [[ ("$INPUTS_COMMENT_PR" == "on-diff" || "$INPUTS_COMMENT_PR" == "on-change") && "$exitcode" -eq 0 && -n "$bot_comment" ]]; then
+          gh api /repos/"$GH_REPOSITORY"/issues/comments/${bot_comment} --header "$GH_API" --method DELETE
+          exit 0
+        fi
+
+        # Exit early if no comment is needed.
+        if [[ "$create_comment" != "true" ]]; then
+          exit 0
+        fi
+
+        # Create PR comment based on configuration and existing comment.
+        if [[ -n "$bot_comment" ]]; then
+          if [[ "$INPUTS_COMMENT_METHOD" == "update" ]]; then
+            # Update existing comment.
+            pr_comment=$(gh api /repos/"$GH_REPOSITORY"/issues/comments/${bot_comment} --header "$GH_API" --method PATCH --field "body=${body}")
+            echo "comment_id=$(echo "$pr_comment" | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"
+          elif [[ "$INPUTS_COMMENT_METHOD" == "recreate" ]]; then
+            # Delete previous comment before posting a new one.
+            gh api /repos/"$GH_REPOSITORY"/issues/comments/${bot_comment} --header "$GH_API" --method DELETE
+            pr_comment=$(gh api /repos/"$GH_REPOSITORY"/issues/"$STEPS_IDENTIFIER_PR"/comments --header "$GH_API" --method POST --field "body=${body}")
+            echo "comment_id=$(echo "$pr_comment" | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          # Post new comment.
+          pr_comment=$(gh api /repos/"$GH_REPOSITORY"/issues/"$STEPS_IDENTIFIER_PR"/comments --header "$GH_API" --method POST --field "body=${body}")
+          echo "comment_id=$(echo "$pr_comment" | jq --raw-output '.id')" >> "$GITHUB_OUTPUT"
+        fi
+outputs:
+  check-id:
+    description: "ID of the check run."
+    value: ${{ steps.post.outputs.check_id }}
+  command:
+    description: "Input of the last TF command."
+    value: ${{ steps.post.outputs.command }}
+  comment-body:
+    description: "Body of the PR comment."
+    value: ${{ steps.post.outputs.comment_body }}
+  comment-id:
+    description: "ID of the PR comment."
+    value: ${{ steps.post.outputs.comment_id }}
+  diff:
+    description: "Diff of changes, if present (truncated)."
+    value: ${{ steps.post.outputs.diff }}
+  exitcode:
+    description: "Exit code of the last TF command."
+    value: ${{ steps.apply.outputs.exit_code || steps.plan.outputs.exit_code || steps.validate.outputs.exit_code || steps.initialize.outputs.exit_code || steps.format.outputs.exit_code }}
+  identifier:
+    description: "Unique name of the workflow run and artifact."
+    value: ${{ steps.identifier.outputs.name }}
+  job-id:
+    description: "ID of the workflow job."
+    value: ${{ steps.post.outputs.job }}
+  plan-id:
+    description: "ID of the plan file artifact."
+    value: ${{ steps.upload.outputs.artifact-id || steps.upload-v3.outputs.artifact-id }}
+  plan-url:
+    description: "URL of the plan file artifact."
+    value: ${{ steps.upload.outputs.artifact-url || steps.upload-v3.outputs.artifact-url }}
+  result:
+    description: "Result of the last TF command (truncated)."
+    value: ${{ steps.post.outputs.result }}
+  run-url:
+    description: "URL of the workflow run."
+    value: ${{ steps.post.outputs.run_url }}
+  summary:
+    description: "Summary of the last TF command."
+    value: ${{ steps.post.outputs.summary }}
+inputs:
+  # Action parameters.
+  command:
+    default: ""
+    description: "Command to run between: `plan` or `apply`. Optionally `init` for checks and outputs only (e.g., `plan`)."
+    required: false
+  comment-method:
+    default: "update"
+    description: "PR comment by: `update` existing comment or `recreate` and delete previous one (e.g., `update`)."
+    required: false
+  comment-pr:
+    default: "always"
+    description: "Add a PR comment: `always`, `on-diff`, or `never` (e.g., `always`)."
+    required: false
+  expand-diff:
+    default: "false"
+    description: "Expand the collapsible diff section (e.g., `false`)."
+    required: false
+  expand-summary:
+    default: "false"
+    description: "Expand the collapsible summary section (e.g., `false`)."
+    required: false
+  format:
+    default: "false"
+    description: "Check format of TF code (e.g., `false`)."
+    required: false
+  hide-args:
+    default: "detailed-exitcode,parallelism,lock,out,var="
+    description: "Hide comma-separated arguments from the command input (e.g., `detailed-exitcode,lock,out,var=`)."
+    required: false
+  plan-encrypt:
+    default: ""
+    description: "Encrypt plan file artifact with the given input (e.g., `secrets.PASSPHRASE`)."
+    required: false
+  plan-file:
+    default: ""
+    description: "Supply existing plan file path instead of the auto-generated one (e.g., `path/to/file.tfplan`)."
+    required: false
+  plan-parity:
+    default: "false"
+    description: "Replace the plan file if it matches a newly-generated one to prevent stale apply (e.g., `false`)."
+    required: false
+  pr-number:
+    default: ""
+    description: "Specify PR number in case of unsupported workflow trigger (e.g., `123`)."
+    required: false
+  preserve-plan:
+    default: "false"
+    description: "Preserve plan file in the given working directory after workflow execution (e.g., `false`)."
+    required: false
+  retention-days:
+    default: ""
+    description: "Duration after which plan file artifact will expire in days (e.g., '90')."
+    required: false
+  show-args:
+    default: "workspace"
+    description: "Show comma-separated arguments in the command input (e.g., `workspace`)."
+    required: false
+  tag-actor:
+    default: "always"
+    description: "Tag the workflow triggering actor: `always`, `on-diff`, or `never` (e.g., `always`)."
+    required: false
+  token:
+    default: ${{ github.token }}
+    description: "Specify a GitHub token (e.g., `secrets.GITHUB_TOKEN`)."
+    required: false
+  tool:
+    default: "terraform"
+    description: "Provisioning tool to use between: `terraform` or `tofu` (e.g., `terraform`)."
+    required: false
+  upload-plan:
+    default: "true"
+    description: "Upload plan file as GitHub workflow artifact (e.g., `true`)."
+    required: false
+  validate:
+    default: "false"
+    description: "Check validation of TF code (e.g., `false`)."
+    required: false
+  working-directory:
+    default: ""
+    description: "Specify the working directory of TF code, alias of `arg-chdir` (e.g., `stacks/dev`)."
+    required: false
+  # CLI arguments.
+  arg-auto-approve:
+    default: ""
+    description: "auto-approve"
+    required: false
+  arg-backend-config:
+    default: ""
+    description: "backend-config"
+    required: false
+  arg-backend:
+    default: ""
+    description: "backend"
+    required: false
+  arg-backup:
+    default: ""
+    description: "backup"
+    required: false
+  arg-chdir:
+    default: ""
+    description: "chdir"
+    required: false
+  arg-check:
+    default: "true"
+    description: "check"
+    required: false
+  arg-compact-warnings:
+    default: ""
+    description: "compact-warnings"
+    required: false
+  arg-concise:
+    default: ""
+    description: "concise"
+    required: false
+  arg-destroy:
+    default: ""
+    description: "destroy"
+    required: false
+  arg-detailed-exitcode:
+    default: "true"
+    description: "detailed-exitcode"
+    required: false
+  arg-diff:
+    default: "true"
+    description: "diff"
+    required: false
+  arg-force-copy:
+    default: ""
+    description: "force-copy"
+    required: false
+  arg-from-module:
+    default: ""
+    description: "from-module"
+    required: false
+  arg-generate-config-out:
+    default: ""
+    description: "generate-config-out"
+    required: false
+  arg-get:
+    default: ""
+    description: "get"
+    required: false
+  arg-list:
+    default: ""
+    description: "list"
+    required: false
+  arg-lock-timeout:
+    default: ""
+    description: "lock-timeout"
+    required: false
+  arg-lock:
+    default: ""
+    description: "lock"
+    required: false
+  arg-lockfile:
+    default: ""
+    description: "lockfile"
+    required: false
+  arg-migrate-state:
+    default: ""
+    description: "migrate-state"
+    required: false
+  arg-no-tests:
+    default: ""
+    description: "no-tests"
+    required: false
+  arg-parallelism:
+    default: ""
+    description: "parallelism"
+    required: false
+  arg-plugin-dir:
+    default: ""
+    description: "plugin-dir"
+    required: false
+  arg-reconfigure:
+    default: ""
+    description: "reconfigure"
+    required: false
+  arg-recursive:
+    default: "true"
+    description: "recursive"
+    required: false
+  arg-refresh-only:
+    default: ""
+    description: "refresh-only"
+    required: false
+  arg-refresh:
+    default: ""
+    description: "refresh"
+    required: false
+  arg-replace:
+    default: ""
+    description: "replace"
+    required: false
+  arg-state-out:
+    default: ""
+    description: "state-out"
+    required: false
+  arg-state:
+    default: ""
+    description: "state"
+    required: false
+  arg-target:
+    default: ""
+    description: "target"
+    required: false
+  arg-test-directory:
+    default: ""
+    description: "test-directory"
+    required: false
+  arg-upgrade:
+    default: ""
+    description: "upgrade"
+    required: false
+  arg-var-file:
+    default: ""
+    description: "var-file"
+    required: false
+  arg-var:
+    default: ""
+    description: "var"
+    required: false
+  arg-workspace:
+    default: ""
+    description: "workspace"
+    required: false
+  arg-write:
+    default: ""
+    description: "write"
+    required: false
+branding:
+  color: purple
+  icon: package
