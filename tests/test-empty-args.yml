@@ -1,0 +1,58 @@
+name: Test minimal invocation with no optional args
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake gh CLI and fake terraform
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cp tests/fixtures/fake-gh.sh "$HOME/.local/bin/gh"
+          chmod +x "$HOME/.local/bin/gh"
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          echo "Terraform v1.0.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          command: ""
+          tool: terraform
+          pr-number: "0"
+
+      - name: Assert identifier output is set with no args
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output should not be empty even with no optional args"
+            exit 1
+          fi
+          # Should match: terraform-0-<md5hash>.tfplan
+          if ! echo "$IDENTIFIER" | grep -qE '^terraform-0-[a-f0-9]{32}\.tfplan$'; then
+            echo "FAIL: identifier '$IDENTIFIER' does not match expected pattern 'terraform-0-<md5hash>.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier is set correctly with no optional args"
+
+      - name: Assert identifier is deterministic (same inputs = same hash)
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          # The MD5 of an empty string is d41d8cd98f00b204e9800998ecf8427e
+          EXPECTED_HASH="d41d8cd98f00b204e9800998ecf8427e"
+          EXPECTED="terraform-0-${EXPECTED_HASH}.tfplan"
+          if [ "$IDENTIFIER" != "$EXPECTED" ]; then
+            echo "FAIL: expected '$EXPECTED' but got '$IDENTIFIER'"
+            exit 1
+          fi
+          echo "PASS: identifier is deterministic with empty args"

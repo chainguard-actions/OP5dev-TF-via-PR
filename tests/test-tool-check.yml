@@ -1,0 +1,46 @@
+name: Test tool check - missing tool detection
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install required system tools and mock gh
+        run: |
+          # Ensure required tools are available
+          which jq || sudo apt-get install -y jq
+          which md5sum || sudo apt-get install -y coreutils
+          which unzip || sudo apt-get install -y unzip
+
+          mkdir -p "$HOME/.local/bin"
+
+          # Mock gh CLI - just needs to exist
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/bash
+          echo "gh mock: $@"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run action with nonexistent tool and expect failure
+        id: action
+        uses: .
+        with:
+          tool: nonexistent-tool-xyz-abc
+          command: ""
+        continue-on-error: true
+
+      - name: Assert action failed due to missing tool
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail when tool is not installed, got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action correctly failed when required tool was missing"

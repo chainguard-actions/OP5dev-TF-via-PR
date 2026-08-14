@@ -1,0 +1,86 @@
+name: Test multi-value arg handling
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_EVENT_NAME: workflow_dispatch
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install required tools and mocks
+        run: |
+          which jq || sudo apt-get install -y jq
+          which md5sum || sudo apt-get install -y coreutils
+          which unzip || sudo apt-get install -y unzip
+
+          mkdir -p "$HOME/.local/bin"
+
+          # Mock gh CLI - just needs to exist for tool check
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/bash
+          echo "gh mock: $@"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          # Mock terraform - just needs to exist for tool check
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/bash
+          echo "terraform mock: $@"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Run action with comma-separated multi-value args
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: ""
+          arg-target: "module.foo,module.bar"
+          arg-replace: "aws_instance.web,aws_instance.db"
+          arg-var: "env=prod,region=us-east-1"
+          pr-number: "1"
+        continue-on-error: true
+
+      - name: Assert action succeeded with multi-value args
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "action outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed with multi-value args, got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action succeeded with multi-value args"
+
+      - name: Assert identifier output is set and matches pattern
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          # Identifier should match pattern: terraform-1-<32-char-md5>.tfplan
+          if [[ ! "$ACTUAL" =~ ^terraform-1-[a-f0-9]{32}\.tfplan$ ]]; then
+            echo "FAIL: identifier '$ACTUAL' does not match expected pattern 'terraform-1-<md5>.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier is set and matches expected pattern"
+
+      - name: Assert multi-value args produce unique identifier
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          # Compute what the identifier would be with no args (pr=1, no args)
+          baseline_hash=$(echo -n "" | md5sum | awk '{print $1}')
+          baseline="terraform-1-${baseline_hash}.tfplan"
+          echo "actual identifier:   '$ACTUAL'"
+          echo "baseline identifier: '$baseline'"
+          if [ "$ACTUAL" = "$baseline" ]; then
+            echo "FAIL: expected multi-value args to produce a different identifier than no-args baseline"
+            exit 1
+          fi
+          echo "PASS: multi-value args produce a unique identifier different from no-args baseline"

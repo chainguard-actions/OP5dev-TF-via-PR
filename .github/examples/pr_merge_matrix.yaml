@@ -1,0 +1,45 @@
+---
+name: Trigger on pull_request (plan) and merge_group (apply) events with OpenTofu in matrix strategy.
+
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  tf:
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read        # Required to identify workflow run.
+      checks: write        # Required to add status summary.
+      contents: read       # Required to checkout repository.
+      pull-requests: write # Required to add PR comment.
+
+    strategy:
+      fail-fast: false
+      matrix:
+        deployment: [dev, qa, prod]
+
+    environment: ${{ github.event_name == 'merge_group' && matrix.deployment || '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup TF
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_wrapper: false
+
+      - name: Provision TF
+        uses: op5dev/tf-via-pr@v13
+        with:
+          working-directory: path/to/${{ matrix.deployment }}
+          tool: tofu
+          command: ${{ github.event_name == 'merge_group' && 'apply' || 'plan' }}
+          arg-refresh: ${{ github.event_name == 'merge_group' && 'false' || 'true' }} # Skip refresh on apply.
+          arg-lock: ${{ github.event_name == 'merge_group' }}
+          arg-var-file: env/${{ matrix.deployment }}.tfvars
+          arg-workspace: ${{ matrix.deployment }}
+          plan-encrypt: ${{ secrets.PASSPHRASE }}
+          plan-parity: true # Prevents stale apply within merge queue.

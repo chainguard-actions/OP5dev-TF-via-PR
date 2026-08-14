@@ -1,0 +1,50 @@
+name: Test tofu tool variant
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake gh CLI and fake tofu
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cp tests/fixtures/fake-gh.sh "$HOME/.local/bin/gh"
+          chmod +x "$HOME/.local/bin/gh"
+          cat > "$HOME/.local/bin/tofu" << 'EOF'
+          #!/bin/sh
+          echo "OpenTofu v1.6.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/tofu"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          command: ""
+          tool: tofu
+          pr-number: "99"
+
+      - name: Assert identifier uses tofu prefix
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if ! echo "$IDENTIFIER" | grep -qE '^tofu-99-[a-f0-9]{32}\.tfplan$'; then
+            echo "FAIL: identifier '$IDENTIFIER' does not match expected pattern 'tofu-99-<md5hash>.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier correctly uses tofu prefix"
+
+      - name: Assert identifier starts with tofu
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if ! echo "$IDENTIFIER" | grep -q '^tofu-'; then
+            echo "FAIL: identifier should start with 'tofu-' when tool=tofu"
+            exit 1
+          fi
+          echo "PASS: identifier starts with tofu"

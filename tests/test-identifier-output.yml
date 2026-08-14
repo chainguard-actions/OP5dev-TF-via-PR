@@ -1,0 +1,62 @@
+name: Test identifier output
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake gh CLI and fake terraform
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cp tests/fixtures/fake-gh.sh "$HOME/.local/bin/gh"
+          chmod +x "$HOME/.local/bin/gh"
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          echo "Terraform v1.0.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          command: ""
+          tool: terraform
+          pr-number: "42"
+
+      - name: Assert identifier output has correct format
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          # Should match pattern: terraform-42-<md5hash>.tfplan
+          if ! echo "$IDENTIFIER" | grep -qE '^terraform-42-[a-f0-9]{32}\.tfplan$'; then
+            echo "FAIL: identifier '$IDENTIFIER' does not match expected pattern 'terraform-42-<md5hash>.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier matches expected pattern"
+
+      - name: Assert identifier starts with tool name
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if ! echo "$IDENTIFIER" | grep -q '^terraform-'; then
+            echo "FAIL: identifier should start with 'terraform-'"
+            exit 1
+          fi
+          echo "PASS: identifier starts with tool name"
+
+      - name: Assert identifier ends with .tfplan
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if ! echo "$IDENTIFIER" | grep -q '\.tfplan$'; then
+            echo "FAIL: identifier should end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier ends with .tfplan"

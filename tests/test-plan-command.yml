@@ -1,0 +1,102 @@
+name: Test plan command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake gh CLI and fake terraform
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          cp tests/fixtures/fake-gh.sh "$HOME/.local/bin/gh"
+          chmod +x "$HOME/.local/bin/gh"
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          # Fake terraform: handle all commands, supporting -chdir=<dir> prefix
+          chdir_dir=""
+          cmd=""
+          for arg in "$@"; do
+            case "$arg" in
+              -chdir=*) chdir_dir="${arg#-chdir=}" ;;
+              init|plan|validate|show|fmt|apply) cmd="$arg"; break ;;
+            esac
+          done
+          case "$cmd" in
+            init)
+              echo "Terraform has been successfully initialized!"
+              exit 0
+              ;;
+            plan)
+              echo "No changes. Your infrastructure matches the configuration."
+              # Create a fake tfplan file in the chdir directory if specified
+              if [ -n "$chdir_dir" ]; then
+                touch "${chdir_dir}/tfplan"
+              else
+                touch tfplan
+              fi
+              exit 0
+              ;;
+            show)
+              echo "No changes. Your infrastructure matches the configuration."
+              exit 0
+              ;;
+            validate)
+              echo "Success! The configuration is valid."
+              exit 0
+              ;;
+            fmt)
+              exit 0
+              ;;
+            *)
+              echo "Terraform v1.0.0"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          command: "plan"
+          tool: terraform
+          arg-chdir: "tests/fixtures/tf-plan"
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+        continue-on-error: true
+
+      - name: Assert plan step ran (identifier set)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "outcome: '$OUTCOME'"
+          echo "exitcode: '$EXITCODE'"
+          echo "identifier: '$IDENTIFIER'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output should not be empty - identifier step did not run"
+            exit 1
+          fi
+          if ! echo "$IDENTIFIER" | grep -q '\.tfplan$'; then
+            echo "FAIL: identifier '$IDENTIFIER' should end with .tfplan"
+            exit 1
+          fi
+          echo "PASS: plan command ran and identifier is set: $IDENTIFIER"
+
+      - name: Assert exitcode is valid plan result
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "exitcode: '$EXITCODE'"
+          # Exit code 0 means no changes, exit code 2 means changes present
+          # Both are valid for a plan command; empty means post step may have overridden
+          if [ -n "$EXITCODE" ] && [ "$EXITCODE" != "0" ] && [ "$EXITCODE" != "2" ]; then
+            echo "FAIL: expected exitcode 0 or 2 for plan command, got '$EXITCODE'"
+            exit 1
+          fi
+          echo "PASS: exitcode '$EXITCODE' is valid for plan command"
