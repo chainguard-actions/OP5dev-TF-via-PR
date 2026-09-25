@@ -1,0 +1,71 @@
+name: Test tofu tool selection
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install stub tools
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Stub gh: returns empty JSON array for API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          if [ "$1" = "api" ]; then
+            echo "[]"
+            exit 0
+          fi
+          echo "gh version 2.0.0 (stub)"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          # Stub tofu: just exits 0
+          cat > "$HOME/.local/bin/tofu" << 'EOF'
+          #!/bin/sh
+          echo "OpenTofu stub v1.0.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/tofu"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          # command="" means no init/plan/apply/post step runs
+          # pr-number bypasses the gh api call in the identifier step
+          command: ""
+          tool: "tofu"
+          upload-plan: "false"
+          pr-number: "0"
+
+      - name: Assert identifier uses tofu tool name
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: $IDENTIFIER"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if ! echo "$IDENTIFIER" | grep -q "^tofu-"; then
+            echo "FAIL: identifier should start with 'tofu-' when tool=tofu"
+            echo "Got: $IDENTIFIER"
+            exit 1
+          fi
+          echo "PASS: identifier correctly uses tofu tool name: $IDENTIFIER"
+
+      - name: Assert action succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed but got outcome='$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS: action succeeded with tofu tool"

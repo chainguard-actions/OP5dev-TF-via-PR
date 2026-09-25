@@ -1,0 +1,88 @@
+name: Test identifier generation
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install stub tools
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Stub gh: returns empty JSON array for API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          if [ "$1" = "api" ]; then
+            echo "[]"
+            exit 0
+          fi
+          echo "gh version 2.0.0 (stub)"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          # Stub terraform: just exits 0
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          echo "Terraform stub v1.0.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action-default
+        uses: .
+        with:
+          # command="" means no init/plan/apply/post step runs
+          # pr-number bypasses the gh api call in the identifier step
+          command: ""
+          tool: terraform
+          pr-number: "99"
+          upload-plan: "false"
+
+      - name: Assert default identifier format
+        env:
+          IDENTIFIER: ${{ steps.action-default.outputs.identifier }}
+        run: |
+          echo "identifier: $IDENTIFIER"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          # Format: terraform-<pr>-<md5>.tfplan
+          if ! echo "$IDENTIFIER" | grep -qE "^terraform-99-[a-f0-9]{32}\.tfplan$"; then
+            echo "FAIL: identifier does not match expected pattern 'terraform-99-<md5>.tfplan'"
+            echo "Got: $IDENTIFIER"
+            exit 1
+          fi
+          echo "PASS: identifier matches expected format: $IDENTIFIER"
+
+      - id: action-with-chdir
+        uses: .
+        with:
+          # command="" means no init/plan/apply/post step runs
+          command: ""
+          tool: terraform
+          arg-chdir: "stacks/prod"
+          pr-number: "99"
+          upload-plan: "false"
+
+      - name: Assert chdir changes identifier
+        env:
+          IDENTIFIER_DEFAULT: ${{ steps.action-default.outputs.identifier }}
+          IDENTIFIER_CHDIR: ${{ steps.action-with-chdir.outputs.identifier }}
+        run: |
+          echo "default identifier: $IDENTIFIER_DEFAULT"
+          echo "chdir identifier:   $IDENTIFIER_CHDIR"
+          if [ -z "$IDENTIFIER_CHDIR" ]; then
+            echo "FAIL: chdir identifier output is empty"
+            exit 1
+          fi
+          if [ "$IDENTIFIER_DEFAULT" = "$IDENTIFIER_CHDIR" ]; then
+            echo "FAIL: identifiers should differ when arg-chdir changes"
+            exit 1
+          fi
+          echo "PASS: different arg-chdir produces different identifier"

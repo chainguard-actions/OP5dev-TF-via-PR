@@ -1,0 +1,89 @@
+name: Test format command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install stub tools
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Stub gh: returns empty JSON array for API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          if [ "$1" = "api" ]; then
+            echo "[]"
+            exit 0
+          fi
+          echo "gh version 2.0.0 (stub)"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          # Stub terraform: handles fmt and other commands
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          # Parse subcommand (may be "fmt" or "-chdir=... fmt")
+          for arg in "$@"; do
+            case "$arg" in
+              fmt) echo "Formatting stub: OK"; exit 0 ;;
+              version) echo "Terraform stub v1.0.0"; exit 0 ;;
+            esac
+          done
+          echo "Terraform stub v1.0.0"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          # command="" means no init/plan/apply/post step runs
+          # format=true causes the format step to run regardless of command
+          command: ""
+          format: "true"
+          tool: terraform
+          arg-chdir: "tests/fixtures/tf-format"
+          arg-check: "true"
+          arg-diff: "true"
+          arg-recursive: "true"
+          upload-plan: "false"
+          pr-number: "0"
+
+      - name: Assert action succeeded (format ran without errors)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exitcode: $EXITCODE"
+          # The fixture is properly formatted, so format should succeed with exitcode 0
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed but got outcome='$OUTCOME'"
+            exit 1
+          fi
+          if [ "$EXITCODE" != "0" ]; then
+            echo "FAIL: expected exitcode 0 (well-formatted code) but got '$EXITCODE'"
+            exit 1
+          fi
+          echo "PASS: format ran successfully with exitcode=0"
+
+      - name: Assert identifier is set
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: $IDENTIFIER"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if ! echo "$IDENTIFIER" | grep -q "terraform"; then
+            echo "FAIL: identifier does not contain 'terraform'"
+            exit 1
+          fi
+          echo "PASS: identifier='$IDENTIFIER'"

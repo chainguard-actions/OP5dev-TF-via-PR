@@ -1,6 +1,12 @@
 {
   "owner": "OP5dev",
   "repo": "TF-via-PR",
-  "version": "",
-  "url": "https://github.com/OP5dev/TF-via-PR"
+  "version": "v14.0.0-alpha",
+  "commit_sha": "de3d1ac3ca31b0a4f8df07b63189ea778d232079",
+  "url": "https://github.com/OP5dev/TF-via-PR",
+  "policy_sha": "d636be7e43ef829af6e853da6b3c7566db9f72fe",
+  "test_policy_sha": "843adf9e4b8f85d0c08b27b9d0b09dd094b54702",
+  "test_agent_version": "2",
+  "harden_agent_version": "2",
+  "dependency_fingerprint": "sha256:b3dc39d58be096b8013abcb0e31431882d1e64eabfe9ae8b30b082820233448e"
 }
