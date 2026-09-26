@@ -1,0 +1,81 @@
+name: Test identifier generation
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_EVENT_NAME: workflow_dispatch
+      GITHUB_REPOSITORY: test-owner/test-repo
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake terraform binary
+        run: |
+          mkdir -p "$HOME/bin"
+          cat > "$HOME/bin/terraform" << 'EOF'
+          #!/bin/bash
+          echo "fake terraform $@"
+          exit 0
+          EOF
+          chmod +x "$HOME/bin/terraform"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Install fake gh binary
+        run: |
+          mkdir -p "$HOME/bin"
+          cat > "$HOME/bin/gh" << 'EOF'
+          #!/bin/bash
+          echo '[]'
+          exit 0
+          EOF
+          chmod +x "$HOME/bin/gh"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: ""
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "42"
+        continue-on-error: true
+
+      - name: Assert action did not error
+        run: |
+          echo "outcome: ${{ steps.action.outcome }}"
+          if [ "${{ steps.action.outcome }}" == "failure" ]; then
+            echo "FAIL: action unexpectedly failed"
+            exit 1
+          fi
+          echo "PASS: action completed"
+
+      - name: Assert identifier output format
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          # Identifier should match pattern: terraform-42-<md5hash>.tfplan
+          if [[ ! "$ACTUAL" =~ ^terraform-42-[a-f0-9]{32}\.tfplan$ ]]; then
+            echo "FAIL: identifier '$ACTUAL' does not match expected pattern 'terraform-42-<md5hash>.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier matches expected pattern"
+
+      - name: Assert identifier is consistent (deterministic)
+        run: |
+          # Compute expected identifier manually using same logic as action
+          # With no chdir, workspace, backend-config, var-file, var, replace, target, destroy args
+          # the identifier string is empty
+          identifier=""
+          expected_hash=$(echo -n "$identifier" | md5sum | awk '{print $1}')
+          expected="terraform-42-${expected_hash}.tfplan"
+          actual="${{ steps.action.outputs.identifier }}"
+          echo "expected: '$expected'"
+          echo "actual:   '$actual'"
+          if [ "$actual" != "$expected" ]; then
+            echo "FAIL: identifier mismatch"
+            exit 1
+          fi
+          echo "PASS: identifier is deterministic and correct"

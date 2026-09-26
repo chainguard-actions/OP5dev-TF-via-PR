@@ -83,84 +83,97 @@ runs:
         # Environment variables.
         echo "GH_API=X-GitHub-Api-Version:2022-11-28" >> "$GITHUB_ENV"
         safe_gh_host=$(printf '%s' "${GITHUB_SERVER_URL#*://}" | tr -d '\n\r')
-        echo "GH_HOST=$safe_gh_host" >> "$GITHUB_ENV"
+        echo "GH_HOST=${safe_gh_host}" >> "$GITHUB_ENV"
         safe_gh_repo=$(printf '%s' "$GH_REPO" | tr -d '\n\r')
-        echo "GH_REPO=$safe_gh_repo" >> "$GITHUB_ENV"
+        echo "GH_REPO=${safe_gh_repo}" >> "$GITHUB_ENV"
         safe_token=$(printf '%s' "$INPUTS_TOKEN" | tr -d '\n\r')
-        echo "GH_TOKEN=$safe_token" >> "$GITHUB_ENV"
+        echo "GH_TOKEN=${safe_token}" >> "$GITHUB_ENV"
         if [[ -n "$TF_CLI_ARGS_EXISTING" ]]; then
-          safe_tf_cli_args=$(printf '%s' "$TF_CLI_ARGS_EXISTING -no-color" | tr -d '\n\r')
+          safe_tf_cli_args=$(printf '%s' "$TF_CLI_ARGS_EXISTING" | tr -d '\n\r')
+          echo "TF_CLI_ARGS=${safe_tf_cli_args} -no-color" >> "$GITHUB_ENV"
         else
-          safe_tf_cli_args="-no-color"
+          echo "TF_CLI_ARGS=-no-color" >> "$GITHUB_ENV"
         fi
-        echo "TF_CLI_ARGS=$safe_tf_cli_args" >> "$GITHUB_ENV"
         echo "TF_IN_AUTOMATION=true" >> "$GITHUB_ENV"
         echo "TF_INPUT=false" >> "$GITHUB_ENV"
         safe_tf_workspace=$(printf '%s' "$TF_WORKSPACE" | tr -d '\n\r')
-        echo "TF_WORKSPACE=$safe_tf_workspace" >> "$GITHUB_ENV"
+        echo "TF_WORKSPACE=${safe_tf_workspace}" >> "$GITHUB_ENV"
 
         # CLI arguments.
-        # Sanitize all caller-controlled inputs to prevent newline injection into GITHUB_OUTPUT.
-        INPUTS_ARG_BACKEND=$(printf '%s' "$INPUTS_ARG_BACKEND" | tr -d '\n\r')
-        INPUTS_ARG_BACKEND_CONFIG=$(printf '%s' "$INPUTS_ARG_BACKEND_CONFIG" | tr -d '\n\r')
-        INPUTS_ARG_BACKUP=$(printf '%s' "$INPUTS_ARG_BACKUP" | tr -d '\n\r')
-        INPUTS_ARG_CHDIR=$(printf '%s' "$INPUTS_ARG_CHDIR" | tr -d '\n\r')
-        INPUTS_ARG_FROM_MODULE=$(printf '%s' "$INPUTS_ARG_FROM_MODULE" | tr -d '\n\r')
-        INPUTS_ARG_GENERATE_CONFIG_OUT=$(printf '%s' "$INPUTS_ARG_GENERATE_CONFIG_OUT" | tr -d '\n\r')
-        INPUTS_ARG_GET=$(printf '%s' "$INPUTS_ARG_GET" | tr -d '\n\r')
-        INPUTS_ARG_LIST=$(printf '%s' "$INPUTS_ARG_LIST" | tr -d '\n\r')
-        INPUTS_ARG_LOCK_TIMEOUT=$(printf '%s' "$INPUTS_ARG_LOCK_TIMEOUT" | tr -d '\n\r')
-        INPUTS_ARG_LOCK=$(printf '%s' "$INPUTS_ARG_LOCK" | tr -d '\n\r')
-        INPUTS_ARG_LOCKFILE=$(printf '%s' "$INPUTS_ARG_LOCKFILE" | tr -d '\n\r')
-        INPUTS_ARG_PARALLELISM=$(printf '%s' "$INPUTS_ARG_PARALLELISM" | tr -d '\n\r')
-        INPUTS_ARG_PLUGIN_DIR=$(printf '%s' "$INPUTS_ARG_PLUGIN_DIR" | tr -d '\n\r')
-        INPUTS_ARG_REFRESH=$(printf '%s' "$INPUTS_ARG_REFRESH" | tr -d '\n\r')
-        INPUTS_ARG_REPLACE=$(printf '%s' "$INPUTS_ARG_REPLACE" | tr -d '\n\r')
-        INPUTS_ARG_STATE_OUT=$(printf '%s' "$INPUTS_ARG_STATE_OUT" | tr -d '\n\r')
-        INPUTS_ARG_STATE=$(printf '%s' "$INPUTS_ARG_STATE" | tr -d '\n\r')
-        INPUTS_ARG_TARGET=$(printf '%s' "$INPUTS_ARG_TARGET" | tr -d '\n\r')
-        INPUTS_ARG_TEST_DIRECTORY=$(printf '%s' "$INPUTS_ARG_TEST_DIRECTORY" | tr -d '\n\r')
-        INPUTS_ARG_VAR_FILE=$(printf '%s' "$INPUTS_ARG_VAR_FILE" | tr -d '\n\r')
-        INPUTS_ARG_VAR=$(printf '%s' "$INPUTS_ARG_VAR" | tr -d '\n\r')
-        INPUTS_ARG_WRITE=$(printf '%s' "$INPUTS_ARG_WRITE" | tr -d '\n\r')
-        TF_WORKSPACE=$(printf '%s' "$TF_WORKSPACE" | tr -d '\n\r')
-        echo arg-auto-approve=$([[ "${INPUTS_ARG_AUTO_APPROVE,,}" == "true" ]] && echo " -auto-approve" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-backend-config=$([[ -n "$INPUTS_ARG_BACKEND_CONFIG" ]] && echo " -backend-config=$INPUTS_ARG_BACKEND_CONFIG" | sed "s/,/ -backend-config=/g" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-backend=$([[ -n "$INPUTS_ARG_BACKEND" ]] && echo " -backend=$INPUTS_ARG_BACKEND" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-backup=$([[ -n "$INPUTS_ARG_BACKUP" ]] && echo " -backup=$INPUTS_ARG_BACKUP" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-chdir=$([[ -n "$INPUTS_ARG_CHDIR" ]] && echo " -chdir=$INPUTS_ARG_CHDIR" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-check=$([[ "${INPUTS_ARG_CHECK,,}" == "true" ]] && echo " -check" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-compact-warnings=$([[ "${INPUTS_ARG_COMPACT_WARNINGS,,}" == "true" ]] && echo " -compact-warnings" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-concise=$([[ "${INPUTS_ARG_CONCISE,,}" == "true" ]] && echo " -concise" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-destroy=$([[ "${INPUTS_ARG_DESTROY,,}" == "true" ]] && echo " -destroy" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-detailed-exitcode=$([[ "${INPUTS_ARG_DETAILED_EXITCODE,,}" == "true" ]] && echo " -detailed-exitcode" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-diff=$([[ "${INPUTS_ARG_DIFF,,}" == "true" ]] && echo " -diff" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-force-copy=$([[ "${INPUTS_ARG_FORCE_COPY,,}" == "true" ]] && echo " -force-copy" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-from-module=$([[ -n "$INPUTS_ARG_FROM_MODULE" ]] && echo " -from-module=$INPUTS_ARG_FROM_MODULE" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-generate-config-out=$([[ -n "$INPUTS_ARG_GENERATE_CONFIG_OUT" ]] && echo " -generate-config-out=$INPUTS_ARG_GENERATE_CONFIG_OUT" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-get=$([[ -n "$INPUTS_ARG_GET" ]] && echo " -get=$INPUTS_ARG_GET" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-list=$([[ -n "$INPUTS_ARG_LIST" ]] && echo " -list=$INPUTS_ARG_LIST" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-lock-timeout=$([[ -n "$INPUTS_ARG_LOCK_TIMEOUT" ]] && echo " -lock-timeout=$INPUTS_ARG_LOCK_TIMEOUT" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-lock=$([[ -n "$INPUTS_ARG_LOCK" ]] && echo " -lock=$INPUTS_ARG_LOCK" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-lockfile=$([[ -n "$INPUTS_ARG_LOCKFILE" ]] && echo " -lockfile=$INPUTS_ARG_LOCKFILE" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-migrate-state=$([[ "${INPUTS_ARG_MIGRATE_STATE,,}" == "true" ]] && echo " -migrate-state" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-no-tests=$([[ "${INPUTS_ARG_NO_TESTS,,}" == "true" ]] && echo " -no-tests" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-parallelism=$([[ -n "$INPUTS_ARG_PARALLELISM" ]] && echo " -parallelism=$INPUTS_ARG_PARALLELISM" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-plugin-dir=$([[ -n "$INPUTS_ARG_PLUGIN_DIR" ]] && echo " -plugin-dir=$INPUTS_ARG_PLUGIN_DIR" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-reconfigure=$([[ "${INPUTS_ARG_RECONFIGURE,,}" == "true" ]] && echo " -reconfigure" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-recursive=$([[ "${INPUTS_ARG_RECURSIVE,,}" == "true" ]] && echo " -recursive" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-refresh-only=$([[ "${INPUTS_ARG_REFRESH_ONLY,,}" == "true" ]] && echo " -refresh-only" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-refresh=$([[ -n "$INPUTS_ARG_REFRESH" ]] && echo " -refresh=$INPUTS_ARG_REFRESH" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-replace=$([[ -n "$INPUTS_ARG_REPLACE" ]] && echo " -replace=$INPUTS_ARG_REPLACE" | sed "s/,/ -replace=/g" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-state-out=$([[ -n "$INPUTS_ARG_STATE_OUT" ]] && echo " -state-out=$INPUTS_ARG_STATE_OUT" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-state=$([[ -n "$INPUTS_ARG_STATE" ]] && echo " -state=$INPUTS_ARG_STATE" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-target=$([[ -n "$INPUTS_ARG_TARGET" ]] && echo " -target=$INPUTS_ARG_TARGET" | sed "s/,/ -target=/g" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-test-directory=$([[ -n "$INPUTS_ARG_TEST_DIRECTORY" ]] && echo " -test-directory=$INPUTS_ARG_TEST_DIRECTORY" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-upgrade=$([[ "${INPUTS_ARG_UPGRADE,,}" == "true" ]] && echo " -upgrade" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-var-file=$([[ -n "$INPUTS_ARG_VAR_FILE" ]] && echo " -var-file=$INPUTS_ARG_VAR_FILE" | sed "s/,/ -var-file=/g" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-var=$([[ -n "$INPUTS_ARG_VAR" ]] && echo " -var=$INPUTS_ARG_VAR" | sed "s/,/ -var=/g" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-write=$([[ -n "$INPUTS_ARG_WRITE" ]] && echo " -write=$INPUTS_ARG_WRITE" || echo "") >> "$GITHUB_OUTPUT"
-        echo arg-workspace=$([[ -n "$TF_WORKSPACE" ]] && echo " -workspace=$TF_WORKSPACE" || echo "") >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_AUTO_APPROVE,,}" == "true" ]] && echo " -auto-approve" || echo "")" | tr -d '\n\r')
+        echo "arg-auto-approve=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_BACKEND_CONFIG" ]] && echo " -backend-config=$INPUTS_ARG_BACKEND_CONFIG" | sed "s/,/ -backend-config=/g" || echo "")" | tr -d '\n\r')
+        echo "arg-backend-config=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_BACKEND" ]] && echo " -backend=$INPUTS_ARG_BACKEND" || echo "")" | tr -d '\n\r')
+        echo "arg-backend=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_BACKUP" ]] && echo " -backup=$INPUTS_ARG_BACKUP" || echo "")" | tr -d '\n\r')
+        echo "arg-backup=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_CHDIR" ]] && echo " -chdir=$INPUTS_ARG_CHDIR" || echo "")" | tr -d '\n\r')
+        echo "arg-chdir=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_CHECK,,}" == "true" ]] && echo " -check" || echo "")" | tr -d '\n\r')
+        echo "arg-check=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_COMPACT_WARNINGS,,}" == "true" ]] && echo " -compact-warnings" || echo "")" | tr -d '\n\r')
+        echo "arg-compact-warnings=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_CONCISE,,}" == "true" ]] && echo " -concise" || echo "")" | tr -d '\n\r')
+        echo "arg-concise=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_DESTROY,,}" == "true" ]] && echo " -destroy" || echo "")" | tr -d '\n\r')
+        echo "arg-destroy=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_DETAILED_EXITCODE,,}" == "true" ]] && echo " -detailed-exitcode" || echo "")" | tr -d '\n\r')
+        echo "arg-detailed-exitcode=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_DIFF,,}" == "true" ]] && echo " -diff" || echo "")" | tr -d '\n\r')
+        echo "arg-diff=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_FORCE_COPY,,}" == "true" ]] && echo " -force-copy" || echo "")" | tr -d '\n\r')
+        echo "arg-force-copy=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_FROM_MODULE" ]] && echo " -from-module=$INPUTS_ARG_FROM_MODULE" || echo "")" | tr -d '\n\r')
+        echo "arg-from-module=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_GENERATE_CONFIG_OUT" ]] && echo " -generate-config-out=$INPUTS_ARG_GENERATE_CONFIG_OUT" || echo "")" | tr -d '\n\r')
+        echo "arg-generate-config-out=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_GET" ]] && echo " -get=$INPUTS_ARG_GET" || echo "")" | tr -d '\n\r')
+        echo "arg-get=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_LIST" ]] && echo " -list=$INPUTS_ARG_LIST" || echo "")" | tr -d '\n\r')
+        echo "arg-list=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_LOCK_TIMEOUT" ]] && echo " -lock-timeout=$INPUTS_ARG_LOCK_TIMEOUT" || echo "")" | tr -d '\n\r')
+        echo "arg-lock-timeout=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_LOCK" ]] && echo " -lock=$INPUTS_ARG_LOCK" || echo "")" | tr -d '\n\r')
+        echo "arg-lock=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_LOCKFILE" ]] && echo " -lockfile=$INPUTS_ARG_LOCKFILE" || echo "")" | tr -d '\n\r')
+        echo "arg-lockfile=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_MIGRATE_STATE,,}" == "true" ]] && echo " -migrate-state" || echo "")" | tr -d '\n\r')
+        echo "arg-migrate-state=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_NO_TESTS,,}" == "true" ]] && echo " -no-tests" || echo "")" | tr -d '\n\r')
+        echo "arg-no-tests=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_PARALLELISM" ]] && echo " -parallelism=$INPUTS_ARG_PARALLELISM" || echo "")" | tr -d '\n\r')
+        echo "arg-parallelism=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_PLUGIN_DIR" ]] && echo " -plugin-dir=$INPUTS_ARG_PLUGIN_DIR" || echo "")" | tr -d '\n\r')
+        echo "arg-plugin-dir=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_RECONFIGURE,,}" == "true" ]] && echo " -reconfigure" || echo "")" | tr -d '\n\r')
+        echo "arg-reconfigure=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_RECURSIVE,,}" == "true" ]] && echo " -recursive" || echo "")" | tr -d '\n\r')
+        echo "arg-recursive=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_REFRESH_ONLY,,}" == "true" ]] && echo " -refresh-only" || echo "")" | tr -d '\n\r')
+        echo "arg-refresh-only=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_REFRESH" ]] && echo " -refresh=$INPUTS_ARG_REFRESH" || echo "")" | tr -d '\n\r')
+        echo "arg-refresh=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_REPLACE" ]] && echo " -replace=$INPUTS_ARG_REPLACE" | sed "s/,/ -replace=/g" || echo "")" | tr -d '\n\r')
+        echo "arg-replace=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_STATE_OUT" ]] && echo " -state-out=$INPUTS_ARG_STATE_OUT" || echo "")" | tr -d '\n\r')
+        echo "arg-state-out=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_STATE" ]] && echo " -state=$INPUTS_ARG_STATE" || echo "")" | tr -d '\n\r')
+        echo "arg-state=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_TARGET" ]] && echo " -target=$INPUTS_ARG_TARGET" | sed "s/,/ -target=/g" || echo "")" | tr -d '\n\r')
+        echo "arg-target=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_TEST_DIRECTORY" ]] && echo " -test-directory=$INPUTS_ARG_TEST_DIRECTORY" || echo "")" | tr -d '\n\r')
+        echo "arg-test-directory=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ "${INPUTS_ARG_UPGRADE,,}" == "true" ]] && echo " -upgrade" || echo "")" | tr -d '\n\r')
+        echo "arg-upgrade=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_VAR_FILE" ]] && echo " -var-file=$INPUTS_ARG_VAR_FILE" | sed "s/,/ -var-file=/g" || echo "")" | tr -d '\n\r')
+        echo "arg-var-file=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_VAR" ]] && echo " -var=$INPUTS_ARG_VAR" | sed "s/,/ -var=/g" || echo "")" | tr -d '\n\r')
+        echo "arg-var=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$INPUTS_ARG_WRITE" ]] && echo " -write=$INPUTS_ARG_WRITE" || echo "")" | tr -d '\n\r')
+        echo "arg-write=${_out}" >> "$GITHUB_OUTPUT"
+        _out=$(printf '%s' "$([[ -n "$TF_WORKSPACE" ]] && echo " -workspace=$TF_WORKSPACE" || echo "")" | tr -d '\n\r')
+        echo "arg-workspace=${_out}" >> "$GITHUB_OUTPUT"
     - id: identifier
       env:
         GH_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
@@ -200,14 +213,14 @@ runs:
           fi
         fi
         safe_pr_number=$(printf '%s' "${pr_number:-0}" | tr -d '\n\r')
-        echo "pr=$safe_pr_number" >> "$GITHUB_OUTPUT"
+        echo "pr=${safe_pr_number}" >> "$GITHUB_OUTPUT"
 
         # Generate identifier for the workflow run using MD5 hashing algorithm for concise and unique naming.
         identifier="${STEP_ARG_CHDIR}${STEP_ARG_WORKSPACE}${STEP_ARG_BACKEND_CONFIG}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_REPLACE}${STEP_ARG_TARGET}${STEP_ARG_DESTROY}"
         identifier=$(echo -n "$identifier" | md5sum | awk '{print $1}')
-        safe_identifier_name=$(printf '%s' "${INPUTS_TOOL}-${pr_number}-${identifier}.tfplan" | tr -d '\n\r')
-        echo "GH_IDENTIFIER_NAME=$safe_identifier_name" >> "$GITHUB_ENV"
-        echo "name=$safe_identifier_name" >> "$GITHUB_OUTPUT"
+        safe_tool=$(printf '%s' "$INPUTS_TOOL" | tr -d '\n\r')
+        echo "GH_IDENTIFIER_NAME=${safe_tool}-${safe_pr_number}-${identifier}.tfplan" >> "$GITHUB_ENV"
+        echo "name=${safe_tool}-${safe_pr_number}-${identifier}.tfplan" >> "$GITHUB_OUTPUT"
     - if: ${{ inputs.format == 'true' }}
       id: format
       env:
@@ -224,16 +237,25 @@ runs:
         trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
         args="${STEP_ARG_CHECK}${STEP_ARG_DIFF}${STEP_ARG_LIST}${STEP_ARG_RECURSIVE}${STEP_ARG_WRITE}"
         echo "$INPUTS_TOOL fmt${STEP_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" fmt${args} 2>&1 | tee tf.console.txt
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        tf_args=()
+        if [ -n "$args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" fmt "${tf_args[@]}" 2>&1 | tee tf.console.txt
     - if: ${{ contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
       id: initialize
       env:
         INPUTS_TOOL: ${{ inputs.tool }}
         STEP_ARG_BACKEND_CONFIG: ${{ steps.arg.outputs.arg-backend-config }}
         STEP_ARG_BACKEND: ${{ steps.arg.outputs.arg-backend }}
-        STEP_ARG_VAR_FILE_TOFU: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var-file || '' }}
-        STEP_ARG_VAR_TOFU: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var || '' }}
+        STEP_ARG_VAR_FILE: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var-file || '' }}
+        STEP_ARG_VAR: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var || '' }}
         STEP_ARG_FORCE_COPY: ${{ steps.arg.outputs.arg-force-copy }}
         STEP_ARG_FROM_MODULE: ${{ steps.arg.outputs.arg-from-module }}
         STEP_ARG_GET: ${{ steps.arg.outputs.arg-get }}
@@ -250,16 +272,25 @@ runs:
       run: |
         # TF initialize.
         trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
-        args="${STEP_ARG_BACKEND_CONFIG}${STEP_ARG_BACKEND}${STEP_ARG_VAR_FILE_TOFU}${STEP_ARG_VAR_TOFU}${STEP_ARG_FORCE_COPY}${STEP_ARG_FROM_MODULE}${STEP_ARG_GET}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_LOCKFILE}${STEP_ARG_MIGRATE_STATE}${STEP_ARG_PLUGIN_DIR}${STEP_ARG_RECONFIGURE}${STEP_ARG_TEST_DIRECTORY}${STEP_ARG_UPGRADE}"
+        args="${STEP_ARG_BACKEND_CONFIG}${STEP_ARG_BACKEND}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_FORCE_COPY}${STEP_ARG_FROM_MODULE}${STEP_ARG_GET}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_LOCKFILE}${STEP_ARG_MIGRATE_STATE}${STEP_ARG_PLUGIN_DIR}${STEP_ARG_RECONFIGURE}${STEP_ARG_TEST_DIRECTORY}${STEP_ARG_UPGRADE}"
         echo "$INPUTS_TOOL init${STEP_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" init${args} 2>&1 | tee tf.console.txt
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        tf_args=()
+        if [ -n "$args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" init "${tf_args[@]}" 2>&1 | tee tf.console.txt
     - if: ${{ inputs.validate == 'true' && contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
       id: validate
       env:
         INPUTS_TOOL: ${{ inputs.tool }}
-        STEP_ARG_VAR_FILE_TOFU: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var-file || '' }}
-        STEP_ARG_VAR_TOFU: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var || '' }}
+        STEP_ARG_VAR_FILE: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var-file || '' }}
+        STEP_ARG_VAR: ${{ inputs.tool == 'tofu' && steps.arg.outputs.arg-var || '' }}
         STEP_ARG_NO_TESTS: ${{ steps.arg.outputs.arg-no-tests }}
         STEP_ARG_TEST_DIRECTORY: ${{ steps.arg.outputs.arg-test-directory }}
         STEP_ARG_CHDIR: ${{ steps.arg.outputs.arg-chdir }}
@@ -267,10 +298,19 @@ runs:
       run: |
         # TF validate.
         trap 'exit_code="$?"; echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"' EXIT
-        args="${STEP_ARG_VAR_FILE_TOFU}${STEP_ARG_VAR_TOFU}${STEP_ARG_NO_TESTS}${STEP_ARG_TEST_DIRECTORY}"
+        args="${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_NO_TESTS}${STEP_ARG_TEST_DIRECTORY}"
         echo "$INPUTS_TOOL validate${STEP_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" validate${args} 2>&1 | tee tf.console.txt
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        tf_args=()
+        if [ -n "$args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" validate "${tf_args[@]}" 2>&1 | tee tf.console.txt
     - if: ${{ inputs.command == 'plan' }}
       id: plan
       env:
@@ -299,8 +339,17 @@ runs:
         args="${STEP_ARG_DESTROY}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_DETAILED_EXITCODE}${STEP_ARG_GENERATE_CONFIG_OUT}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_PARALLELISM}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_TARGET} -out=tfplan"
         echo "$INPUTS_TOOL plan${STEP_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
         if [[ -n "$INPUTS_PLAN_FILE" ]]; then mv --force --verbose "$INPUTS_PLAN_FILE" "$path" 2>/dev/null && exit 0; fi
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" plan${args} 2>&1 | tee tf.console.txt
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        tf_args=()
+        if [ -n "$args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" plan "${tf_args[@]}" 2>&1 | tee tf.console.txt
     - if: ${{ inputs.command == 'apply' && inputs.arg-auto-approve != 'true' && inputs.plan-file == '' }}
       id: download
       env:
@@ -334,7 +383,11 @@ runs:
       shell: bash
       run: |
         # TF show.
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
         "$INPUTS_TOOL" "${chdir_args[@]}" show tfplan > tf.console.txt
 
         # Diff of changes.
@@ -363,7 +416,7 @@ runs:
         fi
     - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && (github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
       id: upload
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: chainguard-actions/actions-upload-artifact@f9571ddcfab0329c68a1e92a4b612bee5d8e5042 # v7.0.1
       with:
         name: ${{ steps.identifier.outputs.name }}
         path: ${{ format('{0}{1}tfplan{2}', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '', inputs.plan-encrypt != '' && '.encrypted' || '') }}
@@ -371,7 +424,7 @@ runs:
         overwrite: true
     - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && !(github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
       id: upload-v3
-      uses: actions/upload-artifact@c6a366c94c3e0affe28c06c8df20a878f24da3cf # v3.2.2
+      uses: chainguard-actions/actions-upload-artifact@73739fdcad9d615876745b754a25923ac2e7216d # v3.2.2
       with:
         name: ${{ steps.identifier.outputs.name }}
         path: ${{ format('{0}{1}tfplan{2}', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '', inputs.plan-encrypt != '' && '.encrypted' || '') }}
@@ -403,8 +456,18 @@ runs:
         # Generate a new plan file, then compare it with the previous one.
         # Both plan files are normalized by sorting JSON keys, removing timestamps and detailed-exitcode to avoid false-positives.
         if [[ -n "$INPUTS_PLAN_FILE" ]]; then mv --force --verbose "$INPUTS_PLAN_FILE" "$path" 2>/dev/null; fi
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" plan${STEP_ARG_DESTROY}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_GENERATE_CONFIG_OUT}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_PARALLELISM}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_TARGET} -out=tfplan.parity
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        parity_args="${STEP_ARG_DESTROY}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_GENERATE_CONFIG_OUT}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_PARALLELISM}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_TARGET} -out=tfplan.parity"
+        tf_args=()
+        if [ -n "$parity_args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$parity_args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" plan "${tf_args[@]}"
         "$INPUTS_TOOL" "${chdir_args[@]}" show -json tfplan.parity | jq --sort-keys '[(.resource_changes? // [])[] | select(.change.actions != ["no-op"])]' > tfplan.new
         "$INPUTS_TOOL" "${chdir_args[@]}" show -json tfplan | jq --sort-keys '[(.resource_changes? // [])[] | select(.change.actions != ["no-op"])]' > tfplan.old
         # If both plan files are identical, then replace the old plan file with the new one to prevent avoidable stale apply.
@@ -452,8 +515,17 @@ runs:
         fi
         args="${STEP_ARG_DESTROY}${var_file}${var}${STEP_ARG_BACKUP}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_PARALLELISM}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_STATE_OUT}${STEP_ARG_STATE}${STEP_ARG_TARGET}${plan}"
         echo "$INPUTS_TOOL apply${STEP_ARG_CHDIR}${args}" | sed 's/ -/\n -/g' > tf.command.txt
-        read -ra chdir_args <<< "${STEP_ARG_CHDIR}"
-        "$INPUTS_TOOL" "${chdir_args[@]}" apply${args} 2>&1 | tee tf.console.txt
+        chdir_args=()
+        if [ -n "$STEP_ARG_CHDIR" ]; then
+          while IFS= read -r -d '' t; do chdir_args+=("$t"); done \
+            < <(printf '%s' "$STEP_ARG_CHDIR" | xargs printf '%s\0')
+        fi
+        tf_args=()
+        if [ -n "$args" ]; then
+          while IFS= read -r -d '' t; do tf_args+=("$t"); done \
+            < <(printf '%s' "$args" | xargs printf '%s\0')
+        fi
+        "$INPUTS_TOOL" "${chdir_args[@]}" apply "${tf_args[@]}" 2>&1 | tee tf.console.txt
     - if: ${{ !cancelled() && steps.identifier.outcome == 'success' && contains(fromJSON('["plan", "apply", "init"]'), inputs.command) }}
       id: post
       env:
@@ -526,8 +598,8 @@ runs:
         done
 
         # Conversely, show each comma-delimited "show-args" argument in the command.
-        all_args="${STEP_ARG_WORKSPACE}${STEP_ARG_BACKEND_CONFIG}${STEP_ARG_BACKEND}${STEP_ARG_BACKUP}${STEP_ARG_CHECK}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_DESTROY}${STEP_ARG_DETAILED_EXITCODE}${STEP_ARG_DIFF}${STEP_ARG_FORCE_COPY}${STEP_ARG_FROM_MODULE}${STEP_ARG_GENERATE_CONFIG_OUT}${STEP_ARG_GET}${STEP_ARG_LIST}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_LOCKFILE}${STEP_ARG_MIGRATE_STATE}${STEP_ARG_NO_TESTS}${STEP_ARG_PARALLELISM}${STEP_ARG_PLUGIN_DIR}${STEP_ARG_RECONFIGURE}${STEP_ARG_RECURSIVE}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_STATE_OUT}${STEP_ARG_STATE}${STEP_ARG_TARGET}${STEP_ARG_TEST_DIRECTORY}${STEP_ARG_UPGRADE}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_WRITE}${STEP_ARG_AUTO_APPROVE}"
         command_append=""
+        all_args="${STEP_ARG_WORKSPACE}${STEP_ARG_BACKEND_CONFIG}${STEP_ARG_BACKEND}${STEP_ARG_BACKUP}${STEP_ARG_CHECK}${STEP_ARG_COMPACT_WARNINGS}${STEP_ARG_CONCISE}${STEP_ARG_DESTROY}${STEP_ARG_DETAILED_EXITCODE}${STEP_ARG_DIFF}${STEP_ARG_FORCE_COPY}${STEP_ARG_FROM_MODULE}${STEP_ARG_GENERATE_CONFIG_OUT}${STEP_ARG_GET}${STEP_ARG_LIST}${STEP_ARG_LOCK_TIMEOUT}${STEP_ARG_LOCK}${STEP_ARG_LOCKFILE}${STEP_ARG_MIGRATE_STATE}${STEP_ARG_NO_TESTS}${STEP_ARG_PARALLELISM}${STEP_ARG_PLUGIN_DIR}${STEP_ARG_RECONFIGURE}${STEP_ARG_RECURSIVE}${STEP_ARG_REFRESH_ONLY}${STEP_ARG_REFRESH}${STEP_ARG_REPLACE}${STEP_ARG_STATE_OUT}${STEP_ARG_STATE}${STEP_ARG_TARGET}${STEP_ARG_TEST_DIRECTORY}${STEP_ARG_UPGRADE}${STEP_ARG_VAR_FILE}${STEP_ARG_VAR}${STEP_ARG_WRITE}${STEP_ARG_AUTO_APPROVE}"
         IFS=',' read -ra show_args <<< "$INPUTS_SHOW_ARGS"
         for arg in "${show_args[@]}"; do
           command_append+=$(echo "$all_args" | sed 's/ -/\n -/g' | grep "^ -${arg}" || true)
@@ -589,8 +661,7 @@ runs:
         echo "check_id=$(echo "$check_run" | jq --raw-output '.id // empty' 2>/dev/null)" >> "$GITHUB_OUTPUT"
         run_url=${check_url:+${check_url}#step:${workflow_step}:1}
         run_url=${run_url:-$GH_SERVER_URL/$GH_REPO/actions/runs/$GH_RUN_ID}
-        safe_run_url=$(printf '%s' "$run_url" | tr -d '\n\r')
-        echo "run_url=$safe_run_url" >> "$GITHUB_OUTPUT"
+        echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
 
         # If "tf.diff.txt" exists, display it within a "diff" block, truncated for character limit.
         if [[ -s tf.diff.txt ]]; then
