@@ -1,0 +1,110 @@
+name: Test tofu tool variant
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake tools (tofu + gh mock)
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Fake tofu supporting init, plan, validate, show
+          cat > "$HOME/.local/bin/tofu" << 'EOF'
+          #!/bin/sh
+          case "$1" in
+            init)
+              echo "OpenTofu has been successfully initialized!"
+              exit 0
+              ;;
+            plan)
+              echo "No changes. Your infrastructure matches the configuration."
+              exit 0
+              ;;
+            validate)
+              echo "Success! The configuration is valid."
+              exit 0
+              ;;
+            show)
+              echo ""
+              exit 0
+              ;;
+            *)
+              echo "Fake tofu: $@"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/tofu"
+
+          # Fake gh that returns safe JSON for all API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          # Fake gh CLI: return safe JSON for API calls used by the action
+          case "$*" in
+            *commits*pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *actions/runs*jobs*)
+              echo '{"jobs":[]}'
+              exit 0
+              ;;
+            *check-runs*)
+              echo '{"id":0,"html_url":""}'
+              exit 0
+              ;;
+            *issues*comments*)
+              echo "[]"
+              exit 0
+              ;;
+            *pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *artifacts*)
+              echo '{"artifacts":[]}'
+              exit 0
+              ;;
+            *)
+              echo "{}"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: ""
+          tool: tofu
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert identifier starts with tofu-
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != "tofu-"* ]]; then
+            echo "FAIL: identifier should start with 'tofu-' when tool=tofu, got: $IDENTIFIER"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != *".tfplan" ]]; then
+            echo "FAIL: identifier should end with '.tfplan', got: $IDENTIFIER"
+            exit 1
+          fi
+          echo "PASS: identifier='$IDENTIFIER'"

@@ -1,0 +1,95 @@
+name: Test missing tool error
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake gh mock (but NOT terraform)
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Fake gh that returns safe JSON for all API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          # Fake gh CLI: return safe JSON for API calls used by the action
+          case "$*" in
+            *commits*pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *actions/runs*jobs*)
+              echo '{"jobs":[]}'
+              exit 0
+              ;;
+            *check-runs*)
+              echo '{"id":0,"html_url":""}'
+              exit 0
+              ;;
+            *issues*comments*)
+              echo "[]"
+              exit 0
+              ;;
+            *pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *artifacts*)
+              echo '{"artifacts":[]}'
+              exit 0
+              ;;
+            *)
+              echo "{}"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure terraform is not on PATH
+        run: |
+          # Verify terraform is not installed (it typically isn't on ubuntu-latest in act)
+          if which terraform > /dev/null 2>&1; then
+            echo "terraform is installed, skipping this test scenario"
+            echo "SKIP=true" >> "$GITHUB_ENV"
+          else
+            echo "terraform not found, test can proceed"
+            echo "SKIP=false" >> "$GITHUB_ENV"
+          fi
+
+      - id: action
+        if: env.SKIP == 'false'
+        uses: .
+        continue-on-error: true
+        with:
+          command: init
+          tool: terraform
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert action failed due to missing tool
+        if: env.SKIP == 'false'
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly failed when terraform is not installed"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: action should have failed when terraform is not installed"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+
+      - name: Skip notice
+        if: env.SKIP == 'true'
+        run: |
+          echo "Skipped: terraform was already installed in this environment"
+          echo "PASS: test scenario not applicable"

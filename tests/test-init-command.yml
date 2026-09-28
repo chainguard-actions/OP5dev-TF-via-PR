@@ -1,0 +1,117 @@
+name: Test init command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake tools (terraform + gh mock)
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Fake terraform supporting init and validate
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          case "$1" in
+            init)
+              echo "Terraform has been successfully initialized!"
+              echo ""
+              echo "You may now begin working with Terraform."
+              exit 0
+              ;;
+            validate)
+              echo "Success! The configuration is valid."
+              exit 0
+              ;;
+            *)
+              echo "Fake terraform: $@"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+
+          # Fake gh that returns safe JSON for all API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          # Fake gh CLI: return safe JSON for API calls used by the action
+          case "$*" in
+            *commits*pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *actions/runs*jobs*)
+              echo '{"jobs":[]}'
+              exit 0
+              ;;
+            *check-runs*)
+              echo '{"id":0,"html_url":""}'
+              exit 0
+              ;;
+            *issues*comments*)
+              echo "[]"
+              exit 0
+              ;;
+            *pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *artifacts*)
+              echo '{"artifacts":[]}'
+              exit 0
+              ;;
+            *)
+              echo "{}"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: init
+          tool: terraform
+          validate: "true"
+          arg-backend: "false"
+          arg-upgrade: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert identifier output is set
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != "terraform-"* ]]; then
+            echo "FAIL: identifier should start with 'terraform-', got: $IDENTIFIER"
+            exit 1
+          fi
+          echo "PASS: identifier='$IDENTIFIER'"
+
+      - name: Assert exitcode output
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exitcode: $EXITCODE"
+          # init succeeded with exit 0, so exitcode should be 0 or empty
+          if [ -n "$EXITCODE" ] && [ "$EXITCODE" != "0" ]; then
+            echo "FAIL: expected exitcode 0 from successful init, got: $EXITCODE"
+            exit 1
+          fi
+          echo "PASS: exitcode='$EXITCODE'"

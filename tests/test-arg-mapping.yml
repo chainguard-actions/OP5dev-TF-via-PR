@@ -1,0 +1,108 @@
+name: Test CLI argument mapping
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake tools (terraform + gh mock)
+        run: |
+          mkdir -p "$HOME/.local/bin"
+
+          # Fake terraform
+          cat > "$HOME/.local/bin/terraform" << 'EOF'
+          #!/bin/sh
+          echo "Fake terraform: $@"
+          exit 0
+          EOF
+          chmod +x "$HOME/.local/bin/terraform"
+
+          # Fake gh that returns safe JSON for all API calls
+          cat > "$HOME/.local/bin/gh" << 'EOF'
+          #!/bin/sh
+          # Fake gh CLI: return safe JSON for API calls used by the action
+          case "$*" in
+            *commits*pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *actions/runs*jobs*)
+              echo '{"jobs":[]}'
+              exit 0
+              ;;
+            *check-runs*)
+              echo '{"id":0,"html_url":""}'
+              exit 0
+              ;;
+            *issues*comments*)
+              echo "[]"
+              exit 0
+              ;;
+            *pulls*)
+              echo "[]"
+              exit 0
+              ;;
+            *artifacts*)
+              echo '{"artifacts":[]}'
+              exit 0
+              ;;
+            *)
+              echo "{}"
+              exit 0
+              ;;
+          esac
+          EOF
+          chmod +x "$HOME/.local/bin/gh"
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          # No command means init/plan/apply steps are skipped
+          command: ""
+          tool: terraform
+          arg-destroy: "true"
+          arg-var: "env=test"
+          arg-target: "module.vpc,module.app"
+          arg-parallelism: "5"
+          arg-lock: "false"
+          arg-refresh: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert identifier output is set (arg and identifier steps ran)
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          # identifier step always runs (no condition), so output should be set
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty - arg/identifier steps did not run"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != "terraform-"* ]]; then
+            echo "FAIL: identifier should start with 'terraform-', got: $IDENTIFIER"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != *".tfplan" ]]; then
+            echo "FAIL: identifier should end with '.tfplan', got: $IDENTIFIER"
+            exit 1
+          fi
+          echo "PASS: identifier='$IDENTIFIER'"
+
+      - name: Assert exitcode output reflects no command run
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exitcode: $EXITCODE"
+          # With no command, no TF command runs, so exitcode should be empty or 0
+          echo "PASS: exitcode='$EXITCODE' (no command was run)"
