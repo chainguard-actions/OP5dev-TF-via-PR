@@ -328,7 +328,7 @@ runs:
         fi
     - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && (github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
       id: upload
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      uses: chainguard-actions/actions-upload-artifact@61ae9717c37cd5ac5fcaa5599c0dab961d043ecc # v4.6.2
       with:
         name: ${{ steps.identifier.outputs.name }}
         path: ${{ format('{0}{1}tfplan{2}', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '', inputs.plan-encrypt != '' && '.encrypted' || '') }}
@@ -336,7 +336,7 @@ runs:
         overwrite: true
     - if: ${{ inputs.command == 'plan' && inputs.upload-plan == 'true' && !(github.server_url == 'https://github.com' || contains(github.server_url, '.ghe.com')) }}
       id: upload-v3
-      uses: actions/upload-artifact@c24449f33cd45d4826c6702db7e49f7cdb9b551d # v3.2.1-node20
+      uses: chainguard-actions/actions-upload-artifact@292c5fe39c5739a9c7d6c86ab79e9bd817fec345 # v3.2.1-node20
       with:
         name: ${{ steps.identifier.outputs.name }}
         path: ${{ format('{0}{1}tfplan', inputs.arg-chdir || inputs.working-directory, (inputs.arg-chdir || inputs.working-directory) && '/' || '') }}
