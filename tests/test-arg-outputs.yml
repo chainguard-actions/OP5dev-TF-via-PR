@@ -1,0 +1,108 @@
+name: Test arg output population
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install prerequisites and fake terraform
+        run: |
+          # Install missing tools if needed
+          NEED_APT_UPDATE=false
+          if ! which gh > /dev/null 2>&1; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            NEED_APT_UPDATE=true
+          fi
+          PKGS=""
+          which jq > /dev/null 2>&1 || PKGS="$PKGS jq"
+          which unzip > /dev/null 2>&1 || PKGS="$PKGS unzip"
+          which gh > /dev/null 2>&1 || PKGS="$PKGS gh"
+          if [ -n "$PKGS" ] || [ "$NEED_APT_UPDATE" = "true" ]; then
+            sudo apt-get update -qq
+            for pkg in $PKGS; do sudo apt-get install -y -qq "$pkg"; done
+          fi
+          # Create a fake terraform binary that just exits 0
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/terraform > /dev/null
+          sudo chmod +x /usr/local/bin/terraform
+          which terraform
+          terraform --version || true
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: ""
+          tool: terraform
+          arg-chdir: "mydir"
+          arg-parallelism: "5"
+          arg-target: "module.foo,module.bar"
+          arg-var: "key=val"
+          arg-var-file: "vars.tfvars"
+          arg-destroy: "true"
+          arg-lock: "false"
+          arg-lock-timeout: "30s"
+          arg-refresh: "true"
+          arg-replace: "aws_instance.web"
+          arg-backend-config: "bucket=mybucket,key=mykey"
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+
+      - name: Assert identifier output is set and contains tool name
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "actual identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          # Should contain 'terraform' and end with '.tfplan'
+          if ! echo "$ACTUAL" | grep -q "terraform"; then
+            echo "FAIL: identifier does not contain 'terraform'"
+            exit 1
+          fi
+          if ! echo "$ACTUAL" | grep -q "\.tfplan$"; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier='$ACTUAL'"
+
+      - name: Assert identifier has valid MD5 hash format
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier with args: '$ACTUAL'"
+          # The identifier format is: terraform-{pr_number}-{md5hash}.tfplan
+          # Extract the hash portion
+          hash=$(echo "$ACTUAL" | sed 's/terraform-[0-9]*-\([0-9a-f]*\)\.tfplan/\1/')
+          echo "hash portion: '$hash'"
+          if [ -z "$hash" ]; then
+            echo "FAIL: could not extract hash from identifier"
+            exit 1
+          fi
+          # Hash should be 32 hex characters (MD5)
+          if ! echo "$hash" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "FAIL: hash '$hash' is not a valid MD5 (32 hex chars)"
+            exit 1
+          fi
+          echo "PASS: identifier has valid MD5 hash format"
+
+      - name: Assert identifier differs from empty-args identifier
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          # Compute what the identifier would be with no args (empty string MD5)
+          empty_hash=$(echo -n "" | md5sum | awk '{print $1}')
+          echo "empty args hash: '$empty_hash'"
+          # The identifier with args should have a different hash
+          if echo "$ACTUAL" | grep -q "$empty_hash"; then
+            echo "FAIL: identifier hash matches empty-args hash, args were not incorporated"
+            exit 1
+          fi
+          echo "PASS: identifier hash differs from empty-args hash (args were incorporated)"

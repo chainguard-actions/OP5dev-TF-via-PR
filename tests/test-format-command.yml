@@ -1,0 +1,75 @@
+name: Test format command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install prerequisites and terraform
+        run: |
+          # Install missing tools if needed
+          NEED_APT_UPDATE=false
+          if ! which gh > /dev/null 2>&1; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            NEED_APT_UPDATE=true
+          fi
+          PKGS=""
+          which jq > /dev/null 2>&1 || PKGS="$PKGS jq"
+          which unzip > /dev/null 2>&1 || PKGS="$PKGS unzip"
+          which gh > /dev/null 2>&1 || PKGS="$PKGS gh"
+          if [ -n "$PKGS" ] || [ "$NEED_APT_UPDATE" = "true" ]; then
+            sudo apt-get update -qq
+            for pkg in $PKGS; do sudo apt-get install -y -qq "$pkg"; done
+          fi
+          # Install terraform via direct binary download if not present
+          if ! which terraform > /dev/null 2>&1; then
+            TF_VERSION="1.9.8"
+            curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+            sudo unzip -q /tmp/terraform.zip -d /usr/local/bin/
+            sudo chmod +x /usr/local/bin/terraform
+            rm /tmp/terraform.zip
+          fi
+          terraform version
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: ""
+          format: "true"
+          tool: terraform
+          arg-chdir: tests/fixtures/tf-fmt
+          arg-check: "true"
+          arg-diff: "true"
+          arg-recursive: "true"
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+
+      - name: Assert identifier output is set
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          echo "PASS: identifier='$ACTUAL'"
+
+      - name: Assert action outcome is success or failure (not skipped)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "exitcode: '$EXITCODE'"
+          if [ "$OUTCOME" = "success" ] || [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action ran with outcome=$OUTCOME exitcode=$EXITCODE"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

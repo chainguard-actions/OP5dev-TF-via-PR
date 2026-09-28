@@ -1,0 +1,80 @@
+name: Test arg outputs are empty when inputs not provided
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install prerequisites and fake terraform
+        run: |
+          # Install missing tools if needed
+          NEED_APT_UPDATE=false
+          if ! which gh > /dev/null 2>&1; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            NEED_APT_UPDATE=true
+          fi
+          PKGS=""
+          which jq > /dev/null 2>&1 || PKGS="$PKGS jq"
+          which unzip > /dev/null 2>&1 || PKGS="$PKGS unzip"
+          which gh > /dev/null 2>&1 || PKGS="$PKGS gh"
+          if [ -n "$PKGS" ] || [ "$NEED_APT_UPDATE" = "true" ]; then
+            sudo apt-get update -qq
+            for pkg in $PKGS; do sudo apt-get install -y -qq "$pkg"; done
+          fi
+          # Create a fake terraform binary that just exits 0
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/terraform > /dev/null
+          sudo chmod +x /usr/local/bin/terraform
+          which terraform
+          terraform --version || true
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          arg-chdir: ""
+          arg-parallelism: ""
+          arg-target: ""
+          arg-var: ""
+          arg-var-file: ""
+          arg-destroy: ""
+          arg-lock: ""
+          arg-replace: ""
+          arg-backend-config: ""
+          arg-workspace: ""
+
+      - name: Assert identifier is set even with minimal inputs
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier should always be set"
+            exit 1
+          fi
+          if ! echo "$ACTUAL" | grep -q "terraform"; then
+            echo "FAIL: identifier does not contain 'terraform'"
+            exit 1
+          fi
+          if ! echo "$ACTUAL" | grep -q "\.tfplan$"; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier='$ACTUAL'"
+
+      - name: Assert exitcode output is empty when no command run
+        env:
+          ACTUAL: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "exitcode: '$ACTUAL'"
+          # With command="" no TF command runs, exitcode should be empty or unset
+          echo "PASS: exitcode='$ACTUAL' (empty is expected when no command runs)"

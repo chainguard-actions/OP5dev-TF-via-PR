@@ -8,61 +8,125 @@
 
 **Test Policy SHA:** `843adf9e4b8f85d0c08b27b9d0b09dd094b54702`
 
-**Harden Agent Version:** `1`
+**Harden Agent Version:** `2`
 
-Action **OP5dev--TF-via-PR/v13.7.1** was hardened automatically. 5 finding(s) were identified and resolved across 3 iteration(s).
+Action **OP5dev--TF-via-PR/v13.7.1** was hardened automatically. 15 finding(s) were identified and resolved across 4 iteration(s).
 
 ## Findings Fixed
 
 ### script-injection (severity: high)
 
-Multiple `${{ }}` expressions are interpolated directly inside `run:` shell command strings across many steps in action.yml, violating rule (a). This allows an attacker to inject arbitrary shell commands.
-
-- **`arg` step**: `${{ env.TF_CLI_ARGS }}` is interpolated directly in the shell command: `echo "TF_CLI_ARGS=$([[ -n "${{ env.TF_CLI_ARGS }}" ]] && echo "${{ env.TF_CLI_ARGS }} -no-color" || echo "-no-color")" >> "$GITHUB_ENV"`
-
-- **`identifier` step**: `${{ github.repository }}`, `${{ github.event.pull_request.head.sha || github.sha }}`, `${{ github.ref_name }}`, `${{ github.event.number || github.event.issue.number }}`, `${{ github.head_ref }}`, `${{ github.ref }}`, and `${{ steps.arg.outputs.* }}` are all interpolated directly into shell commands. Notably: `pr_number=${{ github.event.number || github.event.issue.number }}` and `pr_number=$(echo "${{ github.ref_name }}" | sed ...)` allow attacker-controlled branch/event data to be executed as shell.
-
-- **`format`, `initialize`, `validate`, `plan`, `apply` steps**: `${{ steps.arg.outputs.arg-chdir }}` and other step outputs are interpolated directly into shell commands such as `$INPUTS_TOOL${{ steps.arg.outputs.arg-chdir }} fmt${args}`, allowing injection via the chdir argument.
-
-- **`download` step**: `${{ github.repository }}` and `${{ steps.identifier.outputs.name }}` are interpolated directly into shell commands.
-
-- **`post` step**: `${{ github.repository }}`, `${{ github.run_id }}`, `${{ github.run_attempt }}`, `${{ github.triggering_actor }}`, `${{ github.event.pull_request.updated_at || ... }}`, `${{ steps.format.outcome }}`, and `${{ steps.identifier.outputs.* }}` are all interpolated directly into shell commands, including into a heredoc body that is written to `$GITHUB_OUTPUT` and `$GITHUB_STEP_SUMMARY`.
+Rule (a): Multiple ${{ }} expressions are directly interpolated into run: shell command strings in the 'identifier' step. Attacker-controlled values including `${{ github.event.number || github.event.issue.number }}`, `${{ github.ref_name }}`, `${{ github.event.pull_request.head.sha || github.sha }}`, and `${{ github.repository }}` are expanded by the template engine before the shell sees them, enabling command injection via crafted branch names, PR titles, or event payloads.
 
 Locations:
 
-- `action.yml:66`
-- `action.yml:148`
+- `action.yml:127`
+- `action.yml:131`
+- `action.yml:134`
+
+### script-injection (severity: high)
+
+Rule (a): The 'arg' step's run: block directly interpolates `${{ env.TF_CLI_ARGS }}` into a shell command string: `echo "TF_CLI_ARGS=$([[ -n "${{ env.TF_CLI_ARGS }}" ]] && echo "${{ env.TF_CLI_ARGS }} -no-color" || echo "-no-color")" >> "$GITHUB_ENV"`. The env.* context is workflow-controllable and must not appear directly inside a run: script.
+
+Locations:
+
+- `action.yml:70`
+
+### script-injection (severity: high)
+
+Rule (a): The 'format' step's run: block directly interpolates `${{ steps.arg.outputs.arg-check }}`, `${{ steps.arg.outputs.arg-diff }}`, `${{ steps.arg.outputs.arg-list }}`, `${{ steps.arg.outputs.arg-recursive }}`, `${{ steps.arg.outputs.arg-write }}`, and `${{ steps.arg.outputs.arg-chdir }}` into shell command strings (args= assignment and direct tool invocation). steps.*.outputs.* is a workflow-controllable context.
+
+Locations:
+
+- `action.yml:151`
 - `action.yml:152`
-- `action.yml:155`
-- `action.yml:157`
+- `action.yml:153`
+
+### script-injection (severity: high)
+
+Rule (a): The 'initialize' step's run: block directly interpolates multiple `${{ steps.arg.outputs.* }}` and `${{ env.INPUTS_TOOL }}` expressions into shell command strings (args= assignment and direct tool invocation). steps.*.outputs.* and env.* are workflow-controllable contexts.
+
+Locations:
+
 - `action.yml:163`
+- `action.yml:164`
+- `action.yml:165`
+
+### script-injection (severity: high)
+
+Rule (a): The 'validate' step's run: block directly interpolates multiple `${{ steps.arg.outputs.* }}` and `${{ env.INPUTS_TOOL }}` expressions into shell command strings. steps.*.outputs.* and env.* are workflow-controllable contexts.
+
+Locations:
+
 - `action.yml:175`
-- `action.yml:185`
-- `action.yml:197`
-- `action.yml:210`
-- `action.yml:222`
-- `action.yml:240`
-- `action.yml:260`
-- `action.yml:290`
-- `action.yml:330`
-- `action.yml:370`
-- `action.yml:410`
+- `action.yml:176`
+- `action.yml:177`
+
+### script-injection (severity: high)
+
+Rule (a): The 'plan' step's run: block directly interpolates multiple `${{ steps.arg.outputs.* }}` expressions into shell command strings (args= assignment and direct tool invocation). steps.*.outputs.* is a workflow-controllable context.
+
+Locations:
+
+- `action.yml:189`
+- `action.yml:190`
+- `action.yml:192`
+
+### script-injection (severity: high)
+
+Rule (a): The 'download' step's run: block directly interpolates `${{ github.repository }}` and `${{ steps.identifier.outputs.name }}` into shell command strings. These are workflow-controllable values that are expanded before the shell sees them, enabling injection via crafted artifact names or repository names.
+
+Locations:
+
+- `action.yml:202`
+- `action.yml:203`
+- `action.yml:204`
+- `action.yml:207`
+- `action.yml:208`
+
+### script-injection (severity: high)
+
+Rule (a): The 'show' (TF show) step's run: block directly interpolates `${{ steps.arg.outputs.arg-chdir }}` into a shell command string: `$INPUTS_TOOL${{ steps.arg.outputs.arg-chdir }} show tfplan`. steps.*.outputs.* is a workflow-controllable context.
+
+Locations:
+
+- `action.yml:218`
+
+### script-injection (severity: high)
+
+Rule (a): The 'post' step's run: block directly interpolates multiple ${{ }} expressions into shell commands, including `${{ github.repository }}`, `${{ github.run_id }}`, `${{ github.run_attempt }}`, `${{ github.triggering_actor }}`, `${{ github.event.pull_request.updated_at || ... }}`, `${{ steps.format.outcome }}`, `${{ steps.identifier.outputs.name }}`, `${{ steps.identifier.outputs.pr }}`, and many `${{ steps.arg.outputs.* }}` values. These are all workflow-controllable and are expanded before the shell sees them.
+
+Locations:
+
+- `action.yml:248`
+- `action.yml:249`
+- `action.yml:271`
+- `action.yml:285`
+- `action.yml:291`
 
 ### github-env-injection (severity: high)
 
-Multiple unsanitized values derived from workflow-controllable inputs are written to `$GITHUB_ENV` without the required `printf '%s' ... | tr -d '\n\r'` sanitization step:
-
-1. **`GH_TOKEN=$INPUTS_TOKEN`** — `INPUTS_TOKEN` is set from `${{ inputs.token }}` (a caller-supplied input). Written directly: `echo "GH_TOKEN=$INPUTS_TOKEN" >> "$GITHUB_ENV"`. A newline in the token value could inject additional environment variables.
-
-2. **`TF_CLI_ARGS=${{ env.TF_CLI_ARGS }}`** — `${{ env.TF_CLI_ARGS }}` is a workflow-controlled env var interpolated directly into the shell command that writes to `$GITHUB_ENV`: `echo "TF_CLI_ARGS=$([[ -n "${{ env.TF_CLI_ARGS }}" ]] && echo "${{ env.TF_CLI_ARGS }} -no-color" || echo "-no-color")" >> "$GITHUB_ENV"`. This is both a script-injection and an env-injection vulnerability.
-
-3. **`TF_WORKSPACE=$TF_WORKSPACE`** — `TF_WORKSPACE` is set from `${{ env.TF_WORKSPACE || inputs.arg-workspace }}` (caller-supplied). Written directly: `echo "TF_WORKSPACE=$TF_WORKSPACE" >> "$GITHUB_ENV"` without sanitization.
+The 'arg' step writes `${{ env.TF_CLI_ARGS }}` (an untrusted env.* context value) directly to $GITHUB_ENV without sanitization: `echo "TF_CLI_ARGS=$([[ -n "${{ env.TF_CLI_ARGS }}" ]] && echo "${{ env.TF_CLI_ARGS }} -no-color" || echo "-no-color")" >> "$GITHUB_ENV"`. A newline in TF_CLI_ARGS could inject arbitrary environment variables into subsequent steps. The required sanitization (`printf '%s' ... | tr -d '\n\r'`) is absent.
 
 Locations:
 
-- `action.yml:65`
-- `action.yml:66`
-- `action.yml:68`
+- `action.yml:70`
+
+### github-env-injection (severity: high)
+
+The 'arg' step writes `$INPUTS_TOKEN` (sourced from `${{ inputs.token }}`, a caller-controlled input) to $GITHUB_ENV without sanitization: `echo "GH_TOKEN=$INPUTS_TOKEN" >> "$GITHUB_ENV"`. A newline embedded in the token value could inject arbitrary environment variables into subsequent steps. The required sanitization (`printf '%s' ... | tr -d '\n\r'`) is absent.
+
+Locations:
+
+- `action.yml:69`
+
+### github-env-injection (severity: high)
+
+The 'arg' step writes `$TF_WORKSPACE` (sourced from `${{ env.TF_WORKSPACE || inputs.arg-workspace }}`, a caller-controlled value) to $GITHUB_ENV without sanitization: `echo "TF_WORKSPACE=$TF_WORKSPACE" >> "$GITHUB_ENV"`. A newline in the workspace name could inject arbitrary environment variables into subsequent steps. The required sanitization (`printf '%s' ... | tr -d '\n\r'`) is absent.
+
+Locations:
+
+- `action.yml:73`
 
 ### static-unsanitized-env-write (severity: medium)
 
@@ -96,20 +160,29 @@ Locations:
 
 **Notes:**
 
-Fixed all security findings in action.yml:
+Fixed all script-injection, github-env-injection, and static-unsanitized-env-write findings in action.yml:
 
-1. **script-injection**: Moved all ${{ }} expressions out of run: shell blocks into env: maps for all affected steps (arg, identifier, format, initialize, validate, plan, download, TF show, plan parity, apply, post). Shell scripts now reference plain environment variables.
+1. **arg step**: Moved ${{ env.TF_CLI_ARGS }} to env block as TF_CLI_ARGS_INPUT. Added printf/tr sanitization for GH_TOKEN ($INPUTS_TOKEN), TF_CLI_ARGS, and TF_WORKSPACE before writing to $GITHUB_ENV.
 
-2. **github-env-injection**: Sanitized all three vulnerable GITHUB_ENV writes:
-   - GH_TOKEN: `safe_token=$(printf '%s' "$INPUTS_TOKEN" | tr -d '\n\r')` before writing
-   - TF_CLI_ARGS: moved ${{ env.TF_CLI_ARGS }} to TF_CLI_ARGS_INPUT env var, sanitized with printf/tr before writing
-   - TF_WORKSPACE: `safe_tf_workspace=$(printf '%s' "$TF_WORKSPACE" | tr -d '\n\r')` before writing
+2. **identifier step**: Moved ${{ github.repository }}, ${{ github.event.pull_request.head.sha || github.sha }}, ${{ github.ref_name }}, ${{ github.event.number || github.event.issue.number }}, and all ${{ steps.arg.outputs.* }} expressions to env block.
 
-3. **static-unsanitized-env-write**: Both instances fixed as part of github-env-injection fixes.
+3. **format step**: Moved all ${{ steps.arg.outputs.* }} expressions to env block.
 
-4. **static-inline-injection**: Fixed in identifier step by moving ${{ github.event.pull_request.head.sha || github.sha }} to GH_SHA env var.
+4. **initialize step**: Moved all ${{ steps.arg.outputs.* }} and ${{ env.INPUTS_TOOL == 'tofu' && ... }} expressions to env block.
 
-The post step's heredoc body now uses shell variables (${GH_TRIGGERING_ACTOR}, ${GH_EVENT_TIMESTAMP}, ${STEPS_IDENTIFIER_NAME}, etc.) instead of ${{ }} expressions. The expand-diff and expand-summary logic was converted from inline ${{ env.INPUTS_EXPAND_DIFF == 'true' && ' open' || '' }} expressions to shell if-statements.
+5. **validate step**: Moved all ${{ steps.arg.outputs.* }} and ${{ env.INPUTS_TOOL == 'tofu' && ... }} expressions to env block.
+
+6. **plan step**: Moved all ${{ steps.arg.outputs.* }} expressions to env block.
+
+7. **download step**: Moved ${{ github.repository }} and ${{ steps.identifier.outputs.name }} to env block.
+
+8. **show step**: Moved ${{ steps.arg.outputs.arg-chdir }} to env block.
+
+9. **post step**: Moved all ${{ github.* }}, ${{ steps.format.outcome }}, ${{ steps.identifier.outputs.* }}, and all ${{ steps.arg.outputs.* }} expressions to env block. Replaced template-engine conditionals for expand-diff/expand-summary with bash conditionals.
+
+10. **plan-parity step** (bonus fix): Moved all ${{ steps.arg.outputs.* }} expressions to env block.
+
+11. **apply step** (bonus fix): Moved all ${{ steps.arg.outputs.* }} expressions to env block.
 
 ### Iteration 2
 
@@ -117,13 +190,17 @@ The post step's heredoc body now uses shell variables (${GH_TRIGGERING_ACTOR}, $
 
 **Notes:**
 
-Fixed all three security findings in actions/hardened/OP5dev--TF-via-PR/v13.7.1/action.yml:
+Fixed all 5 security findings in hardened/action/action.yml:
 
-1. **github-env-injection (GH_HOST, line 86)**: Replaced `echo "GH_HOST=$(echo $GITHUB_SERVER_URL | sed 's/.*:\/\///')" >> "$GITHUB_ENV"` with a two-step sanitization: `safe_gh_host=$(printf '%s' "$GITHUB_SERVER_URL" | sed 's/.*:\/\///' | tr -d '\n\r')` then `echo "GH_HOST=$safe_gh_host" >> "$GITHUB_ENV"`.
+1. GH_HOST env injection (line 80): Added `safe_gh_host=$(printf '%s' "$GITHUB_SERVER_URL" | tr -d '\n\r' | sed 's/.*:\/\//')` before writing to GITHUB_ENV.
 
-2. **github-env-injection (GITHUB_OUTPUT lines, lines 88-130)**: Added a `safe_output()` helper function that sanitizes values with `printf '%s' "$val" | tr -d '\n\r'` before writing to `$GITHUB_OUTPUT`. Replaced all 34 bare `echo arg-*=...` lines with calls to `safe_output "arg-*" "$(...)"` to prevent newline injection.
+2. INPUTS_ARG_* output injection (line 83): Wrapped all user-controlled arg values with `printf '%s' "..." | tr -d '\n\r'` sanitization before writing to GITHUB_OUTPUT.
 
-3. **script-injection (unquoted $INPUTS_TOOL, lines 20-22 and other steps)**: Quoted `$INPUTS_TOOL` as `"$INPUTS_TOOL"` in all command executions across all steps (format, initialize, validate, plan, show, parity, apply). Also fixed `which $INPUTS_TOOL` to `which "$INPUTS_TOOL"` in the first step.
+3. INPUTS_TOOL in identifier step (line 175): Added `safe_tool=$(printf '%s' "$INPUTS_TOOL" | tr -d '\n\r')` before using in the name output.
+
+4. command/summary in post step (lines 447, 452): Added `safe_command` and `safe_summary` variables with `tr -d '\n\r'` sanitization before writing to GITHUB_OUTPUT.
+
+5. Unquoted $INPUTS_TOOL and ${ARG_CHDIR} (multiple lines): Replaced all 9 occurrences of `$INPUTS_TOOL${ARG_CHDIR}` in command execution lines with `"$INPUTS_TOOL""${ARG_CHDIR}"` (properly double-quoted) across format, initialize, validate, plan, parity, apply, and show steps.
 
 ### Iteration 3
 
@@ -131,9 +208,15 @@ Fixed all three security findings in actions/hardened/OP5dev--TF-via-PR/v13.7.1/
 
 **Notes:**
 
-Fixed two findings in action.yml:
+Fixed github-env-injection: wrapped 8 unsanitized printf writes to $GITHUB_OUTPUT in the 'arg' step (arg-backend, arg-backup, arg-chdir, arg-get, arg-list, arg-lock-timeout, arg-lock, arg-lockfile) with 'printf "%s" ... | tr -d "\n\r"' sanitization. Also sanitized pr_number in the 'identifier' step before writing to $GITHUB_OUTPUT. Fixed script-injection: quoted $INPUTS_TOOL in the 'which' command, and quoted ${args} in all 5 command execution lines (format, initialize, validate, plan, apply steps) to prevent shell word-splitting on attacker-controlled values.
 
-1. github-env-injection: In the `identifier` step, both writes to $GITHUB_OUTPUT now use `printf '%s' | tr -d '\n\r'` sanitization. `pr_number` is sanitized into `safe_pr` and `INPUTS_TOOL` into `safe_tool`, then the combined name is sanitized into `safe_name` before writing.
+### Iteration 4
 
-2. script-injection: All unquoted `${STEPS_ARG_CHDIR}` and `${args}` expansions in the format, initialize, validate, plan, apply, TF show, and plan parity steps have been replaced with `read -ra cmd_args <<< "${STEPS_ARG_CHDIR} subcommand${args}"` followed by `"$INPUTS_TOOL" "${cmd_args[@]}"`. This uses bash array expansion which properly handles word-splitting while keeping the values quoted. All `# shellcheck disable=SC2086` comments have been removed as they are no longer needed.
+**Fixes applied:** github-env-injection, script-injection
+
+**Notes:**
+
+Two fixes applied to hardened/action/action.yml:
+1. github-env-injection (identifier step, ~line 200): Replaced unsanitized `${pr_number}` with `${safe_pr_number}` in the `name` output write. The `safe_pr_number` variable already had newlines stripped via `tr -d '\n\r'`, so this ensures no attacker-controlled newlines can inject additional key=value pairs into $GITHUB_OUTPUT.
+2. script-injection (plan-parity step, ~line 380): Replaced the unquoted `plan${ARG_DESTROY}${ARG_VAR_FILE}...${ARG_TARGET} -out=tfplan.parity` expansion with the same pattern used by all other equivalent steps (format, init, validate, apply): collect all ARG_* variables into `args` and invoke `plan"${args}"` with double-quoting, preventing shell metacharacter injection from attacker-controlled input values.
 
