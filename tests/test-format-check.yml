@@ -1,0 +1,61 @@
+name: Test format check
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install mock terraform and ensure required tools are available
+        run: |
+          # Create a mock terraform binary that handles fmt and other commands
+          # Exits 0 to simulate properly formatted code
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/terraform
+          chmod +x /usr/local/bin/terraform
+
+          # Verify required tools (install gh if not present)
+          which gh > /dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq && sudo apt-get install -y gh
+          }
+          which jq || { echo "jq not found"; exit 1; }
+          which md5sum || { echo "md5sum not found"; exit 1; }
+          which unzip || { echo "unzip not found"; exit 1; }
+          which terraform
+          echo "All tools available"
+
+      - id: action
+        uses: .
+        with:
+          format: "true"
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-chdir: tests/fixtures/tf-format
+          arg-check: "true"
+          arg-diff: "true"
+          arg-recursive: "false"
+
+      - name: Assert action succeeded
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert identifier output is set
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty — arg/identifier steps did not run"
+            exit 1
+          fi
+          echo "PASS: identifier='$ACTUAL'"

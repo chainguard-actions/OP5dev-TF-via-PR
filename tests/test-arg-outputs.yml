@@ -1,0 +1,95 @@
+name: Test arg output population
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install mock terraform and ensure required tools are available
+        run: |
+          # Create a mock terraform binary — only needs to exist for the prerequisite check
+          # since command="" means no TF commands are actually executed
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/terraform
+          chmod +x /usr/local/bin/terraform
+
+          # Verify required tools (install gh if not present)
+          which gh > /dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq && sudo apt-get install -y gh
+          }
+          which jq || { echo "jq not found"; exit 1; }
+          which md5sum || { echo "md5sum not found"; exit 1; }
+          which unzip || { echo "unzip not found"; exit 1; }
+          which terraform
+          echo "All tools available"
+
+      - id: action-with-args
+        uses: .
+        with:
+          # No command set — only arg + identifier steps run (no TF commands executed)
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-chdir: stacks/dev
+          arg-var: "env=dev,region=us-east-1"
+          arg-target: "module.vpc,module.eks"
+          arg-destroy: "true"
+          arg-parallelism: "10"
+          arg-lock: "false"
+          arg-workspace: "dev"
+
+      - name: Assert action succeeded
+        env:
+          OUTCOME: ${{ steps.action-with-args.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert identifier output is non-empty and matches pattern
+        env:
+          ACTUAL: ${{ steps.action-with-args.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          # Should match pattern: terraform-<pr>-<md5>.tfplan
+          if echo "$ACTUAL" | grep -qE '^terraform-[0-9]+-[a-f0-9]{32}\.tfplan$'; then
+            echo "PASS: identifier matches expected pattern"
+          else
+            echo "FAIL: identifier '$ACTUAL' does not match expected pattern"
+            exit 1
+          fi
+
+      - id: action-no-args
+        uses: .
+        with:
+          # Same tool and pr-number but no args — identifier should differ
+          command: ""
+          tool: terraform
+          pr-number: "0"
+
+      - name: Assert identifiers differ when args differ
+        env:
+          ID_WITH_ARGS: ${{ steps.action-with-args.outputs.identifier }}
+          ID_NO_ARGS: ${{ steps.action-no-args.outputs.identifier }}
+        run: |
+          echo "identifier with args: '$ID_WITH_ARGS'"
+          echo "identifier no args:   '$ID_NO_ARGS'"
+          if [ -z "$ID_WITH_ARGS" ] || [ -z "$ID_NO_ARGS" ]; then
+            echo "FAIL: one or both identifiers are empty"
+            exit 1
+          fi
+          if [ "$ID_WITH_ARGS" = "$ID_NO_ARGS" ]; then
+            echo "FAIL: identifiers should differ when args differ"
+            exit 1
+          fi
+          echo "PASS: identifiers are different as expected"

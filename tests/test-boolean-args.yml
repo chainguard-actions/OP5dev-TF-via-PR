@@ -1,0 +1,100 @@
+name: Test boolean arg flags
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install mock terraform and ensure required tools are available
+        run: |
+          # Create a mock terraform binary — only needs to exist for the prerequisite check
+          # since command="" means no TF commands are actually executed
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/terraform
+          chmod +x /usr/local/bin/terraform
+
+          # Verify required tools (install gh if not present)
+          which gh > /dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq && sudo apt-get install -y gh
+          }
+          which jq || { echo "jq not found"; exit 1; }
+          which md5sum || { echo "md5sum not found"; exit 1; }
+          which unzip || { echo "unzip not found"; exit 1; }
+          which terraform
+          echo "All tools available"
+
+      - id: action-with-destroy
+        uses: .
+        with:
+          # No command — only arg + identifier steps run
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-destroy: "true"
+
+      - name: Assert action succeeded with destroy=true
+        env:
+          OUTCOME: ${{ steps.action-with-destroy.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed with arg-destroy=true, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert identifier is set with destroy=true
+        env:
+          ACTUAL: ${{ steps.action-with-destroy.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if echo "$ACTUAL" | grep -qE '^terraform-[0-9]+-[a-f0-9]{32}\.tfplan$'; then
+            echo "PASS: identifier matches expected pattern"
+          else
+            echo "FAIL: identifier '$ACTUAL' does not match expected pattern"
+            exit 1
+          fi
+
+      - id: action-no-destroy
+        uses: .
+        with:
+          # Same but destroy=false — identifier should differ since destroy is part of MD5
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-destroy: "false"
+
+      - name: Assert action succeeded with destroy=false
+        env:
+          OUTCOME: ${{ steps.action-no-destroy.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed with arg-destroy=false, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert identifiers differ when destroy flag differs
+        env:
+          ID_DESTROY: ${{ steps.action-with-destroy.outputs.identifier }}
+          ID_NO_DESTROY: ${{ steps.action-no-destroy.outputs.identifier }}
+        run: |
+          echo "identifier with destroy: '$ID_DESTROY'"
+          echo "identifier no destroy:   '$ID_NO_DESTROY'"
+          if [ -z "$ID_DESTROY" ] || [ -z "$ID_NO_DESTROY" ]; then
+            echo "FAIL: one or both identifiers are empty"
+            exit 1
+          fi
+          if [ "$ID_DESTROY" = "$ID_NO_DESTROY" ]; then
+            echo "FAIL: identifiers should differ when destroy flag differs"
+            exit 1
+          fi
+          echo "PASS: identifiers are different as expected"

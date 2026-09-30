@@ -1,0 +1,91 @@
+name: Test multi-value comma-separated args
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install mock terraform and ensure required tools are available
+        run: |
+          # Create a mock terraform binary — only needs to exist for the prerequisite check
+          # since command="" means no TF commands are actually executed
+          printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/terraform
+          chmod +x /usr/local/bin/terraform
+
+          # Verify required tools (install gh if not present)
+          which gh > /dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq && sudo apt-get install -y gh
+          }
+          which jq || { echo "jq not found"; exit 1; }
+          which md5sum || { echo "md5sum not found"; exit 1; }
+          which unzip || { echo "unzip not found"; exit 1; }
+          which terraform
+          echo "All tools available"
+
+      - id: action-with-targets
+        uses: .
+        with:
+          # No command — only arg + identifier steps run
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-target: "module.vpc,module.eks"
+          arg-var: "env=prod,region=us-west-2"
+
+      - name: Assert action succeeded with multi-value args
+        env:
+          OUTCOME: ${{ steps.action-with-targets.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed with multi-value args, got '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert identifier is set with multi-value args
+        env:
+          ACTUAL: ${{ steps.action-with-targets.outputs.identifier }}
+        run: |
+          echo "actual identifier: '$ACTUAL'"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if echo "$ACTUAL" | grep -qE '^terraform-[0-9]+-[a-f0-9]{32}\.tfplan$'; then
+            echo "PASS: identifier matches expected pattern"
+          else
+            echo "FAIL: identifier '$ACTUAL' does not match expected pattern"
+            exit 1
+          fi
+
+      - id: action-different-targets
+        uses: .
+        with:
+          # Different targets — identifier should differ
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          arg-target: "module.rds,module.s3"
+          arg-var: "env=prod,region=us-west-2"
+
+      - name: Assert identifiers differ when targets differ
+        env:
+          ID_TARGETS_A: ${{ steps.action-with-targets.outputs.identifier }}
+          ID_TARGETS_B: ${{ steps.action-different-targets.outputs.identifier }}
+        run: |
+          echo "identifier with targets A: '$ID_TARGETS_A'"
+          echo "identifier with targets B: '$ID_TARGETS_B'"
+          if [ -z "$ID_TARGETS_A" ] || [ -z "$ID_TARGETS_B" ]; then
+            echo "FAIL: one or both identifiers are empty"
+            exit 1
+          fi
+          if [ "$ID_TARGETS_A" = "$ID_TARGETS_B" ]; then
+            echo "FAIL: identifiers should differ when targets differ"
+            exit 1
+          fi
+          echo "PASS: identifiers are different as expected"

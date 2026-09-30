@@ -1,0 +1,45 @@
+name: Test missing tool prerequisite check
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Verify standard tools are present
+        run: |
+          # Install gh if not present
+          which gh > /dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update -qq && sudo apt-get install -y gh
+          }
+          which jq || { echo "jq not found"; exit 1; }
+          which md5sum || { echo "md5sum not found"; exit 1; }
+          which unzip || { echo "unzip not found"; exit 1; }
+          echo "Standard tools OK"
+
+      - id: action
+        uses: .
+        with:
+          # Use a non-existent tool name to trigger the prerequisite check failure
+          tool: nonexistent-tf-tool-xyz
+          command: ""
+          pr-number: "0"
+        continue-on-error: true
+
+      - name: Assert action failed due to missing tool
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action correctly failed when required tool is not installed"
+          elif [ "$OUTCOME" = "success" ]; then
+            echo "FAIL: action should have failed when tool 'nonexistent-tf-tool-xyz' is not installed"
+            exit 1
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
