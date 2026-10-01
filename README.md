@@ -12,6 +12,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 | v13.7.1 | [`v13.7.1`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.1) | [`a90a5e0`](https://github.com/OP5dev/TF-via-PR/commit/a90a5e0eca088a36ed6bf75b5b4a6f7d07b750cc) |
 | v13.7.4 | [`v13.7.4`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.4) | [`39ed263`](https://github.com/OP5dev/TF-via-PR/commit/39ed2635c056ca408ed24cc5c2baf0ef4381a7a5) |
 | v13.7.5 | [`v13.7.5`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.5) | [`3b4a0ba`](https://github.com/OP5dev/TF-via-PR/commit/3b4a0baebd84b96b511b7e330653059485ffc310) |
+| v13.7.6 | [`v13.7.6`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v13.7.6) | [`a83f040`](https://github.com/OP5dev/TF-via-PR/commit/a83f0401f98f1509cf234a62fb60ddb2cd62d224) |
 | v14.0.0-alpha | [`v14.0.0-alpha`](https://github.com/chainguard-actions/OP5dev-TF-via-PR/tree/v14.0.0-alpha) | [`de3d1ac`](https://github.com/OP5dev/TF-via-PR/commit/de3d1ac3ca31b0a4f8df07b63189ea778d232079) |
 
 ## Privacy
