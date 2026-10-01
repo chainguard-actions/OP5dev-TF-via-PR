@@ -1,0 +1,74 @@
+name: Test arg outputs - verify command output reflects set arguments
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: init
+          arg-chdir: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          arg-upgrade: "true"
+          arg-reconfigure: "true"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+          show-args: "workspace,upgrade,reconfigure"
+
+      - name: Assert action ran and identifier is set
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          echo "exitcode: '$EXITCODE'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          echo "PASS: action succeeded with identifier '$IDENTIFIER'"
+
+      - name: Assert command output contains terraform and init
+        env:
+          COMMAND: ${{ steps.action.outputs.command }}
+        run: |
+          echo "command: '$COMMAND'"
+          if [ -z "$COMMAND" ]; then
+            echo "FAIL: command output is empty"
+            exit 1
+          fi
+          # Command should contain terraform init with chdir
+          if ! echo "$COMMAND" | grep -q "terraform"; then
+            echo "FAIL: command does not contain 'terraform'"
+            exit 1
+          fi
+          if ! echo "$COMMAND" | grep -q "init"; then
+            echo "FAIL: command does not contain 'init'"
+            exit 1
+          fi
+          echo "PASS: command output '$COMMAND' contains expected content"
+
+      - name: Assert identifier output format
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if [[ "$IDENTIFIER" != terraform-* ]]; then
+            echo "FAIL: identifier does not start with 'terraform-'"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != *.tfplan ]]; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier '$IDENTIFIER' has correct format"

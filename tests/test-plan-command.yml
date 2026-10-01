@@ -1,0 +1,64 @@
+name: Test plan command
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: plan
+          arg-chdir: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert action outcome and outputs
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          RESULT: ${{ steps.action.outputs.result }}
+          SUMMARY: ${{ steps.action.outputs.summary }}
+        run: |
+          echo "exitcode: '$EXITCODE'"
+          echo "identifier: '$IDENTIFIER'"
+          echo "summary: '$SUMMARY'"
+          echo "result length: ${#RESULT}"
+
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != terraform-* ]]; then
+            echo "FAIL: identifier does not start with 'terraform-'"
+            exit 1
+          fi
+          if [ -z "$RESULT" ]; then
+            echo "FAIL: result output is empty"
+            exit 1
+          fi
+          if [ -z "$SUMMARY" ]; then
+            echo "FAIL: summary output is empty"
+            exit 1
+          fi
+          echo "PASS: plan succeeded with all expected outputs"
+
+      - name: Assert run-url output is set
+        env:
+          RUN_URL: ${{ steps.action.outputs.run-url }}
+        run: |
+          echo "run-url: '$RUN_URL'"
+          if [ -z "$RUN_URL" ]; then
+            echo "FAIL: run-url output is empty"
+            exit 1
+          fi
+          echo "PASS: run-url is set to '$RUN_URL'"

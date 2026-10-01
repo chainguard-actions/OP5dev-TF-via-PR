@@ -1,0 +1,69 @@
+#!/bin/sh
+# Mock terraform stub for testing TF-via-PR action.
+# The action calls: terraform [-chdir=PATH] COMMAND [args...]
+# Handles init, validate, plan, show, fmt commands.
+
+# Skip any -chdir= argument to find the actual command
+cmd=""
+out_file=""
+for arg in "$@"; do
+  case "$arg" in
+    -chdir=*) ;;  # skip chdir
+    -out=*)
+      out_file="${arg#-out=}"
+      ;;
+    -*)
+      # skip other flags
+      ;;
+    *)
+      if [ -z "$cmd" ]; then
+        cmd="$arg"
+      fi
+      ;;
+  esac
+done
+
+case "$cmd" in
+  init)
+    echo "Initializing the backend..."
+    echo ""
+    echo "Terraform has been successfully initialized!"
+    exit 0
+    ;;
+  validate)
+    echo "Success! The configuration is valid."
+    exit 0
+    ;;
+  plan)
+    echo "No changes. Your infrastructure matches the configuration."
+    if [ -n "$out_file" ]; then
+      # Resolve out_file relative to chdir if needed
+      # The action passes -chdir=PATH so we need to write to PATH/tfplan
+      chdir_val=""
+      for arg in "$@"; do
+        case "$arg" in
+          -chdir=*) chdir_val="${arg#-chdir=}" ;;
+        esac
+      done
+      if [ -n "$chdir_val" ] && [ "${out_file#/}" = "$out_file" ]; then
+        # relative path - write to chdir/out_file
+        echo "plan-data" > "$chdir_val/$out_file"
+      else
+        echo "plan-data" > "$out_file"
+      fi
+    fi
+    exit 0
+    ;;
+  show)
+    echo "No changes. Your infrastructure matches the configuration."
+    exit 0
+    ;;
+  fmt)
+    # fmt with -check exits 0 if formatted correctly
+    exit 0
+    ;;
+  *)
+    echo "Terraform stub v1.0.0"
+    exit 0
+    ;;
+esac

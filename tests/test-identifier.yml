@@ -1,0 +1,50 @@
+name: Test identifier output
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: ""
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert identifier output format
+        env:
+          ACTUAL: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "actual: '$ACTUAL'"
+          # Identifier should match pattern: terraform-<pr>-<md5hash>.tfplan
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          # Check it starts with "terraform-"
+          if [[ "$ACTUAL" != terraform-* ]]; then
+            echo "FAIL: identifier does not start with 'terraform-'"
+            exit 1
+          fi
+          # Check it ends with ".tfplan"
+          if [[ "$ACTUAL" != *.tfplan ]]; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          # The hash part is a 32-char md5 hex string
+          hash_part=$(echo "$ACTUAL" | sed 's/terraform-[0-9]*-//' | sed 's/\.tfplan//')
+          echo "hash_part: '$hash_part'"
+          if ! echo "$hash_part" | grep -qE '^[0-9a-f]{32}$'; then
+            echo "FAIL: hash part '$hash_part' is not a valid 32-char MD5 hex string"
+            exit 1
+          fi
+          echo "PASS: identifier '$ACTUAL' has correct format"

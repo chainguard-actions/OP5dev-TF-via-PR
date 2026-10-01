@@ -1,0 +1,37 @@
+name: Test format command
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: ""
+          format: "true"
+          arg-chdir: "tests/fixtures/tf-format"
+          arg-check: "true"
+          arg-diff: "true"
+          arg-recursive: "true"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert format exit code is 0 (properly formatted)
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "exitcode: '$EXITCODE'"
+          if [ "$EXITCODE" != "0" ]; then
+            echo "FAIL: expected exit code 0 for properly formatted TF file, got '$EXITCODE'"
+            exit 1
+          fi
+          echo "PASS: format check passed with exit code 0"

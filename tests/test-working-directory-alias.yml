@@ -1,0 +1,57 @@
+name: Test working-directory alias for arg-chdir
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action-with-working-dir
+        uses: .
+        with:
+          tool: terraform
+          command: init
+          working-directory: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - id: action-with-arg-chdir
+        uses: .
+        with:
+          tool: terraform
+          command: init
+          arg-chdir: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert both actions produce same identifier (working-directory == arg-chdir)
+        env:
+          IDENTIFIER_WD: ${{ steps.action-with-working-dir.outputs.identifier }}
+          IDENTIFIER_CD: ${{ steps.action-with-arg-chdir.outputs.identifier }}
+        run: |
+          echo "identifier (working-dir): '$IDENTIFIER_WD'"
+          echo "identifier (arg-chdir): '$IDENTIFIER_CD'"
+
+          if [ -z "$IDENTIFIER_WD" ]; then
+            echo "FAIL: working-directory identifier is empty"
+            exit 1
+          fi
+          if [ -z "$IDENTIFIER_CD" ]; then
+            echo "FAIL: arg-chdir identifier is empty"
+            exit 1
+          fi
+          if [ "$IDENTIFIER_WD" != "$IDENTIFIER_CD" ]; then
+            echo "FAIL: identifiers differ: '$IDENTIFIER_WD' != '$IDENTIFIER_CD'"
+            echo "working-directory and arg-chdir should produce the same identifier"
+            exit 1
+          fi
+          echo "PASS: both identifiers match '$IDENTIFIER_WD'"

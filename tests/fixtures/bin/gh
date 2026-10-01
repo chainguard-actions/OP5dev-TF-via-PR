@@ -1,0 +1,58 @@
+#!/bin/sh
+# Mock gh CLI for testing TF-via-PR action.
+# Handles the API calls the action makes, returning minimal valid JSON.
+# Most calls in the action use "|| true" so failures are tolerated,
+# but the action checks "which gh" so gh must exist.
+
+# Only handle the "api" subcommand
+if [ "$1" != "api" ]; then
+  exit 0
+fi
+
+# Find the API path (first argument starting with /)
+api_path=""
+for arg in "$@"; do
+  case "$arg" in
+    /*)
+      api_path="$arg"
+      break
+      ;;
+  esac
+done
+
+# Route based on API path pattern
+case "$api_path" in
+  */commits/*/pulls*)
+    # PR lookup by commit - return empty array (no associated PRs)
+    echo "[]"
+    ;;
+  */actions/artifacts*)
+    # Artifact lookup - return empty artifacts list
+    echo '{"artifacts":[]}'
+    ;;
+  */actions/jobs*)
+    # Job details - return minimal job JSON with empty steps
+    echo '{"id":0,"steps":[]}'
+    ;;
+  */check-runs*)
+    # Check run update/get - return minimal JSON
+    echo '{"id":0}'
+    ;;
+  */issues/*/comments*)
+    # PR comments list or create - return empty array or minimal comment
+    echo "[]"
+    ;;
+  */issues/comments*)
+    # Comment update/delete
+    echo '{"id":0}'
+    ;;
+  */pulls*)
+    # PR list
+    echo "[]"
+    ;;
+  *)
+    # Default: return empty JSON object
+    echo "{}"
+    ;;
+esac
+exit 0

@@ -1,0 +1,64 @@
+name: Test init command
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: init
+          arg-chdir: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert init exit code is 0
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "exitcode: '$EXITCODE'"
+          if [ "$EXITCODE" != "0" ]; then
+            echo "FAIL: expected exit code 0 for init, got '$EXITCODE'"
+            exit 1
+          fi
+          echo "PASS: init succeeded with exit code 0"
+
+      - name: Assert identifier output is set
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != terraform-* ]]; then
+            echo "FAIL: identifier does not start with 'terraform-'"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != *.tfplan ]]; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier '$IDENTIFIER' is correctly formatted"
+
+      - name: Assert result output is set
+        env:
+          RESULT: ${{ steps.action.outputs.result }}
+        run: |
+          echo "result: '$RESULT'"
+          if [ -z "$RESULT" ]; then
+            echo "FAIL: result output is empty"
+            exit 1
+          fi
+          echo "PASS: result output is non-empty"

@@ -1,0 +1,73 @@
+name: Test arg defaults - empty boolean args produce correct behavior
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Add fixture bin to PATH (provides mock gh and terraform)
+        run: echo "$GITHUB_WORKSPACE/tests/fixtures/bin" >> "$GITHUB_PATH"
+
+      - id: action
+        uses: .
+        with:
+          tool: terraform
+          command: init
+          arg-chdir: "tests/fixtures/tf-basic"
+          arg-backend: "false"
+          # Explicitly set boolean args to false/empty
+          arg-auto-approve: "false"
+          arg-destroy: "false"
+          arg-compact-warnings: "false"
+          arg-migrate-state: "false"
+          arg-reconfigure: "false"
+          arg-refresh-only: "false"
+          arg-upgrade: "false"
+          # Leave string args empty
+          arg-parallelism: ""
+          arg-target: ""
+          arg-var: ""
+          arg-var-file: ""
+          arg-backend-config: ""
+          upload-plan: "false"
+          comment-pr: "never"
+          pr-number: "0"
+
+      - name: Assert action succeeded
+        env:
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "exitcode: '$EXITCODE'"
+          echo "identifier: '$IDENTIFIER'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier output is empty"
+            exit 1
+          fi
+          if [ "$EXITCODE" != "0" ]; then
+            echo "FAIL: expected exit code 0, got '$EXITCODE'"
+            exit 1
+          fi
+          echo "PASS: action succeeded with identifier '$IDENTIFIER' and exitcode '$EXITCODE'"
+
+      - name: Assert identifier format
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "identifier: '$IDENTIFIER'"
+          if [ -z "$IDENTIFIER" ]; then
+            echo "FAIL: identifier is empty"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != terraform-* ]]; then
+            echo "FAIL: identifier does not start with 'terraform-'"
+            exit 1
+          fi
+          if [[ "$IDENTIFIER" != *.tfplan ]]; then
+            echo "FAIL: identifier does not end with '.tfplan'"
+            exit 1
+          fi
+          echo "PASS: identifier '$IDENTIFIER' has correct format"
