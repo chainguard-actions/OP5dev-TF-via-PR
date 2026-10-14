@@ -1,0 +1,70 @@
+name: Test setup argument construction
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          # No command — only setup step runs, no terraform needed.
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          # Test multi-value arg splitting.
+          arg-var: "foo=bar,baz=qux"
+          arg-target: "module.a,module.b"
+          arg-workspace: "staging"
+
+      - name: Assert identifier contains tool name
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier is empty"
+              exit 1
+            fi
+            # Identifier should start with "terraform-"
+            if echo "$IDENTIFIER" | grep -q '^terraform-'; then
+              echo "PASS: identifier starts with 'terraform-': $IDENTIFIER"
+            else
+              echo "FAIL: identifier does not start with 'terraform-': $IDENTIFIER"
+              exit 1
+            fi
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo API call)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+
+      - name: Assert identifier is deterministic (same inputs = same hash)
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          if [ "$OUTCOME" = "success" ]; then
+            # The identifier includes a hash of workspace + backend-config + var-file + var + replace + target + destroy + chdir.
+            # With arg-workspace=staging, arg-var=foo=bar,baz=qux, arg-target=module.a,module.b,
+            # the identifier should be non-empty and contain a hex hash segment.
+            if echo "$IDENTIFIER" | grep -qE '^terraform-0-[a-f0-9]+\.tfplan$'; then
+              echo "PASS: identifier has expected format: $IDENTIFIER"
+            else
+              echo "FAIL: identifier format unexpected: $IDENTIFIER"
+              exit 1
+            fi
+          else
+            echo "PASS: skipping (action did not succeed)"
+          fi

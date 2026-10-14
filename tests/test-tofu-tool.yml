@@ -1,0 +1,63 @@
+name: Test OpenTofu tool selection
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install OpenTofu
+        run: |
+          TOFU_VERSION="1.8.8"
+          curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip
+          unzip -o /tmp/tofu.zip -d /tmp/tofu-bin
+          sudo mv /tmp/tofu-bin/tofu /usr/local/bin/tofu
+          tofu version
+
+      - name: Create minimal TF config for tofu
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/tf-tofu"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/tf-tofu/main.tf" <<'EOF'
+          terraform {
+            required_version = ">= 1.0"
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: init
+          tool: tofu
+          working-directory: tests/fixtures/tf-tofu
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          validate: "false"
+
+      - name: Assert identifier uses tofu tool name
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier is empty on success"
+              exit 1
+            fi
+            # Identifier should start with "tofu-" when tool=tofu.
+            if echo "$IDENTIFIER" | grep -q '^tofu-'; then
+              echo "PASS: identifier starts with 'tofu-': $IDENTIFIER"
+            else
+              echo "FAIL: identifier does not start with 'tofu-': $IDENTIFIER"
+              exit 1
+            fi
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo or network issue)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

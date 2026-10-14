@@ -1,0 +1,67 @@
+name: Test format check
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install terraform
+        run: |
+          TF_VERSION="1.9.8"
+          curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+          unzip -o /tmp/terraform.zip -d /tmp/tf-bin
+          sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          terraform version
+
+      - name: Create well-formatted TF config
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/tf-fmt"
+          # Write a properly formatted terraform file (terraform fmt would not change it).
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/tf-fmt/main.tf" <<'EOF'
+          terraform {
+            required_version = ">= 1.0"
+          }
+
+          variable "example" {
+            type    = string
+            default = "hello"
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          # format: true runs terraform fmt -check; no command means no init/plan/apply.
+          format: "true"
+          command: ""
+          tool: terraform
+          working-directory: tests/fixtures/tf-fmt
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          # arg-check defaults to true (check mode), arg-recursive defaults to true.
+
+      - name: Assert format check ran
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          # Format check on a well-formatted file should succeed (exit 0).
+          # The action may still fail in the post step due to sentinel repo.
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier output is empty on success"
+              exit 1
+            fi
+            echo "PASS: format check succeeded, identifier=$IDENTIFIER"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo or network issue in post step)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

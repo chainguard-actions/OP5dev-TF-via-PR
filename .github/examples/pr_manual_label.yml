@@ -1,0 +1,63 @@
+---
+name: Trigger on labeled and workflow_dispatch manual events on GitHub Enterprise (GHE) self-hosted runner.
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: TF command
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+      lock:
+        description: TF lock
+        required: false
+        type: boolean
+  pull_request:
+    types: [labeled] # https://docs.github.com/actions/learn-github-actions/events-that-trigger-workflows
+
+jobs:
+  tf:
+    runs-on: self-hosted
+
+    permissions:
+      actions: read # Required to identify workflow run.
+      checks: write # Required to add status summary.
+      contents: read # Required to checkout repository.
+      pull-requests: write # Required to add PR comment.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Provision TF via pull_request
+        uses: op5dev/tf-via-pr@v13
+        with:
+          working-directory: path/to/directory
+          command: ${{ inputs.command != '' && inputs.command || contains(github.event.pull_request.labels.*.name, 'run-apply') && 'apply' || 'plan' }}
+          arg-lock: ${{ inputs.lock != '' && inputs.lock || contains(github.event.pull_request.labels.*.name, 'run-apply') }}
+          plan-encrypt: ${{ secrets.PASSPHRASE }}
+          format: true
+          validate: true
+        env:
+          GH_ENTERPRISE_TOKEN: ${{ secrets.GH_ENTERPRISE_TOKEN }}
+          TF_DATA_DIR: path/to/.terraform
+          TF_LOG: ERROR
+
+      - name: Remove label
+        if: |
+          contains(github.event.pull_request.labels.*.name, 'run-plan') ||
+          contains(github.event.pull_request.labels.*.name, 'run-apply')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+          PR_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'run-plan') && 'run-plan' || 'run-apply' }}
+        run: gh api /repos/{owner}/{repo}/issues/${PR_NUMBER}/labels/${PR_LABEL} --method DELETE

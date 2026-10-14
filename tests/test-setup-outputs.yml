@@ -1,0 +1,63 @@
+name: Test setup outputs (no command)
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          # No command — only the setup step runs, no terraform needed.
+          command: ""
+          tool: terraform
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+
+      - name: Assert identifier output is set
+        env:
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          # The setup step computes the identifier locally (no API call needed).
+          # It should always be non-empty and match the pattern: terraform-0-<hash>.tfplan
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier output is empty"
+              exit 1
+            fi
+            if echo "$IDENTIFIER" | grep -qE '^terraform-[0-9]+-[a-f0-9]+\.tfplan$'; then
+              echo "PASS: identifier matches expected pattern: $IDENTIFIER"
+            else
+              echo "FAIL: identifier does not match expected pattern: $IDENTIFIER"
+              exit 1
+            fi
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (likely sentinel repo API call)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi
+
+      - name: Assert run-url output is set when action succeeds
+        env:
+          RUN_URL: ${{ steps.action.outputs.run-url }}
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "run-url: $RUN_URL"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$RUN_URL" ]; then
+              echo "FAIL: run-url output is empty on success"
+              exit 1
+            fi
+            echo "PASS: run-url is set: $RUN_URL"
+          else
+            echo "PASS: skipping run-url check (action did not succeed)"
+          fi

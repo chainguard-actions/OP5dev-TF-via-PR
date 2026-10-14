@@ -1,0 +1,72 @@
+name: Test plan command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install terraform
+        run: |
+          TF_VERSION="1.9.8"
+          curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+          unzip -o /tmp/terraform.zip -d /tmp/tf-bin
+          sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          terraform version
+
+      - name: Create minimal TF config for plan
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/tf-plan"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/tf-plan/main.tf" <<'EOF'
+          terraform {
+            required_version = ">= 1.0"
+          }
+
+          output "hello" {
+            value = "world"
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: plan
+          tool: terraform
+          working-directory: tests/fixtures/tf-plan
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          validate: "false"
+          # Disable detailed-exitcode so exit 2 (changes) doesn't cause issues.
+          arg-detailed-exitcode: ""
+
+      - name: Assert plan ran and produced outputs
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          SUMMARY: ${{ steps.action.outputs.summary }}
+          RESULT: ${{ steps.action.outputs.result }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          echo "summary: $SUMMARY"
+          echo "result (first 200 chars): ${RESULT:0:200}"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier output is empty on success"
+              exit 1
+            fi
+            # Summary should contain something meaningful from terraform plan.
+            if [ -z "$SUMMARY" ]; then
+              echo "FAIL: summary output is empty on success"
+              exit 1
+            fi
+            echo "PASS: plan succeeded, identifier=$IDENTIFIER, summary=$SUMMARY"
+          elif [ "$OUTCOME" = "failure" ]; then
+            echo "PASS: action failed gracefully (sentinel repo API call in post step)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

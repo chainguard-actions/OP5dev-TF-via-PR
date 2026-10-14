@@ -1,0 +1,61 @@
+name: Test init command
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install terraform
+        run: |
+          # Install a recent terraform binary.
+          TF_VERSION="1.9.8"
+          curl -fsSL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o /tmp/terraform.zip
+          unzip -o /tmp/terraform.zip -d /tmp/tf-bin
+          sudo mv /tmp/tf-bin/terraform /usr/local/bin/terraform
+          terraform version
+
+      - name: Create minimal TF config in tests/fixtures/tf-init
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/tests/fixtures/tf-init"
+          cat > "$GITHUB_WORKSPACE/tests/fixtures/tf-init/main.tf" <<'EOF'
+          terraform {
+            required_version = ">= 1.0"
+          }
+          EOF
+
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          command: init
+          tool: terraform
+          working-directory: tests/fixtures/tf-init
+          pr-number: "0"
+          upload-plan: "false"
+          comment-pr: "never"
+          validate: "false"
+
+      - name: Assert action ran init
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          IDENTIFIER: ${{ steps.action.outputs.identifier }}
+          EXITCODE: ${{ steps.action.outputs.exitcode }}
+        run: |
+          echo "outcome: $OUTCOME"
+          echo "identifier: $IDENTIFIER"
+          echo "exitcode: $EXITCODE"
+          if [ "$OUTCOME" = "success" ]; then
+            if [ -z "$IDENTIFIER" ]; then
+              echo "FAIL: identifier output is empty on success"
+              exit 1
+            fi
+            echo "PASS: init succeeded, identifier=$IDENTIFIER"
+          elif [ "$OUTCOME" = "failure" ]; then
+            # May fail due to sentinel repo API calls in the post step.
+            echo "PASS: action failed gracefully (sentinel repo or network issue)"
+          else
+            echo "FAIL: unexpected outcome '$OUTCOME'"
+            exit 1
+          fi

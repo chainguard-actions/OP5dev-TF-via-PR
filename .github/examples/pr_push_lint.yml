@@ -1,0 +1,79 @@
+---
+name: Trigger on pull_request (plan) and push (apply) events with fmt/validate checks and TFLint.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tf:
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read # Required to identify workflow run.
+      checks: write # Required to add status summary.
+      contents: read # Required to checkout repository.
+      pull-requests: write # Required to add PR comment.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup TF
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Init TF
+        id: tf
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: op5dev/tf-via-pr@v13
+        with:
+          working-directory: path/to/directory
+          command: init
+          arg-lock: false
+          format: true
+          validate: true
+
+      - name: Setup TFLint
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: terraform-linters/setup-tflint@v5
+        with:
+          tflint_wrapper: true
+
+      - name: Run TFLint
+        id: tflint-format
+        if: ${{ github.event_name == 'pull_request' }}
+        working-directory: path/to/directory
+        run: |
+          tflint --init
+          tflint --format compact
+        continue-on-error: true
+
+      - name: Comment if TFLint errors
+        if: ${{ github.event_name == 'pull_request' && steps.tflint-format.outputs.exitcode != 0 }}
+        id: tflint-comment
+        env:
+          TFLINT_OUTPUT: ${{ steps.tflint-format.outputs.stderr || steps.tflint-format.outputs.stdout }}
+        run: |
+          # Compose TFLint output.
+          tflint="<details><summary>TFLint output.</summary>
+
+          \`\`\`hcl
+          $(echo "$TFLINT_OUTPUT" | sed 's/`/\\`/g')
+          \`\`\`
+          </details>"
+          {
+            echo 'result<<EOF'
+            echo "$tflint"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Provision TF
+        uses: op5dev/tf-via-pr@v13
+        with:
+          working-directory: path/to/directory
+          command: ${{ github.event_name == 'push' && 'apply' || 'plan' }}
+          arg-lock: ${{ github.event_name == 'push' }}
+          comment-pos-2: ${{ steps.tflint-comment.outputs.result }}
